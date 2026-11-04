@@ -1,0 +1,27 @@
+from sqlalchemy import create_engine
+from sqlalchemy.orm import DeclarativeBase, sessionmaker
+
+from app.config import settings
+
+# Render provides postgresql:// URLs by default. This project installs psycopg 3,
+# so make SQLAlchemy use that driver for both local and hosted databases.
+database_url = settings.database_url
+if database_url.startswith("postgres://"):
+    database_url = "postgresql+psycopg://" + database_url.removeprefix("postgres://")
+elif database_url.startswith("postgresql://"):
+    database_url = "postgresql+psycopg://" + database_url.removeprefix("postgresql://")
+
+engine = create_engine(database_url, pool_pre_ping=True)
+SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
