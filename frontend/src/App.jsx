@@ -7,6 +7,12 @@ const nav = [
   { title: 'MANAGE', links: [['Reports', ClipboardList], ['Staff & permissions', ShieldCheck], ['WhatsApp settings', MessageCircle], ['Clinic settings', Settings]] },
 ];
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? (import.meta.env.DEV ? 'http://localhost:8000' : '');
+const errorText = detail => {
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) return detail.map(item => item?.msg || item?.message || JSON.stringify(item)).join('; ');
+  if (detail && typeof detail === 'object') return detail.message || JSON.stringify(detail);
+  return 'Could not sign in.';
+};
 const reminders = [
   { initials: 'AM', name: 'Ananya Mehta', detail: 'Medication reminder - Metformin', time: '08:00 AM', state: 'Delivered', color: 'mint' },
   { initials: 'RK', name: 'Rohan Kulkarni', detail: 'Appointment - General consultation', time: '09:30 AM', state: 'Confirmed', color: 'blue' },
@@ -227,7 +233,7 @@ function LoginPage({onLogin}) {
       const body=new URLSearchParams({username:email.trim(),password});
       const response=await fetch(`${API_BASE}/api/auth/login`,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body});
       const result=await response.json();
-      if(!response.ok)throw new Error(result.detail||'Could not sign in.');
+      if(!response.ok)throw new Error(errorText(result.detail));
       onLogin(result);
     } catch (err) { setError(err.message==='Failed to fetch'?'Cannot reach the server. Start the backend, then try again.':err.message); }
     finally { setBusy(false); }
