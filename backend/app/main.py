@@ -182,7 +182,24 @@ def register(body: RegisterIn, user: User = Depends(current_user), db: Session =
 
 
 @app.post("/api/auth/login")
-def login(username: str = Form(), password: str = Form(), db: Session = Depends(get_db)):
+async def login(request: Request, db: Session = Depends(get_db)):
+    # Accept the documented OAuth form payload and JSON clients. Parsing the
+    # body here avoids framework-generated model errors when a proxy/client
+    # changes the content type while preserving the same credential contract.
+    content_type = request.headers.get("content-type", "").lower()
+    if "application/json" in content_type:
+        try:
+            body = await request.json()
+        except ValueError:
+            body = None
+        username = body.get("username") if isinstance(body, dict) else None
+        password = body.get("password") if isinstance(body, dict) else None
+    else:
+        form = await request.form()
+        username = form.get("username")
+        password = form.get("password")
+    if not isinstance(username, str) or not isinstance(password, str):
+        raise HTTPException(422, "Expected username and password fields")
     user = db.scalar(select(User).where(User.email == username.lower()))
     if not user or not user.is_active or not verify_password(password, user.password_hash):
         raise HTTPException(401, "Invalid email or password", headers={"WWW-Authenticate": "Bearer"})
