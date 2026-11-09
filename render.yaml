@@ -23,7 +23,7 @@ services:
       - key: REFRESH_TOKEN_DAYS
         value: "30"
       - key: CORS_ORIGINS
-        value: https://careloop-web.onrender.com
+        value: https://careloop-web-9jzh.onrender.com
       - key: WHATSAPP_API_VERSION
         value: v23.0
       - key: WHATSAPP_REMINDER_TEMPLATE_NAME
@@ -47,7 +47,7 @@ services:
     routes:
       - type: rewrite
         source: /api/*
-        destination: https://careloop-api.onrender.com/api/*
+        destination: https://careloop-api-aiz6.onrender.com/api/*
       - type: rewrite
         source: /*
         destination: /index.html
