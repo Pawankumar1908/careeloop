@@ -41,11 +41,21 @@ def _apply_platform_admin_password_recovery():
     with SessionLocal() as db:
         admin = db.scalar(select(User).where(User.email == email, User.role == Role.platform_admin))
         if not admin:
-            raise RuntimeError("Admin password recovery account was not found")
-        admin.password_hash = hash_password(password)
+            existing_user = db.scalar(select(User).where(User.email == email))
+            if existing_user:
+                raise RuntimeError("Admin password recovery email is already used by a non-platform account")
+            admin = User(
+                name=os.getenv("CARELOOP_ADMIN_RESET_NAME", "Platform Admin").strip() or "Platform Admin",
+                email=email,
+                password_hash=hash_password(password),
+                role=Role.platform_admin,
+            )
+            db.add(admin)
+        else:
+            admin.password_hash = hash_password(password)
         db.commit()
 
-    logging.getLogger(__name__).warning("Platform administrator password recovery completed; remove recovery environment variables")
+    logging.getLogger(__name__).warning("Platform administrator recovery completed; remove recovery environment variables")
 
 
 @app.on_event("startup")
