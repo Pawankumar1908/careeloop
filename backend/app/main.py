@@ -15,7 +15,7 @@ import jwt
 from fastapi import Depends, FastAPI, Form, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -23,7 +23,7 @@ from app.auth import access_token, create_refresh, current_user, hash_password, 
 from app.config import settings
 from app.db import SessionLocal, get_db
 from app.models import Clinic, MedicationReminder, MedicationSchedule, Patient, RefreshSession, Role, User, WhatsAppConnection
-from app.schemas import AdminClinicCreateIn, MedicationScheduleIn, PatientCreateIn, RegisterIn, WhatsAppConnectIn, WhatsAppTestMessageIn
+from app.schemas import AdminClinicCreateIn, ClinicMemberCreateIn, MedicationScheduleIn, PatientCreateIn, RegisterIn, WhatsAppConnectIn, WhatsAppTestMessageIn
 from app.whatsapp_service import WhatsAppAPIError, decrypt_access_token, encrypt_access_token, get_phone_details, send_medication_reminder, send_test_template
 
 app = FastAPI(title="ClinicCare API", version="0.1.0")
@@ -31,19 +31,22 @@ app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origin_list, allo
 
 
 def _apply_platform_admin_password_recovery():
+    logger = logging.getLogger(__name__)
     email = os.getenv("CARELOOP_ADMIN_RESET_EMAIL", "").strip().lower()
     password = os.getenv("CARELOOP_ADMIN_RESET_PASSWORD", "")
     if not email and not password:
         return
     if not email or len(password) < 12:
-        raise RuntimeError("Admin password recovery requires an email and a password of at least 12 characters")
+        logger.error("Admin password recovery skipped: configure an email and a password of at least 12 characters")
+        return
 
     with SessionLocal() as db:
         admin = db.scalar(select(User).where(User.email == email, User.role == Role.platform_admin))
         if not admin:
             existing_user = db.scalar(select(User).where(User.email == email))
             if existing_user:
-                raise RuntimeError("Admin password recovery email is already used by a non-platform account")
+                logger.error("Admin password recovery skipped: email belongs to a non-platform account")
+                return
             admin = User(
                 name=os.getenv("CARELOOP_ADMIN_RESET_NAME", "Platform Admin").strip() or "Platform Admin",
                 email=email,
@@ -55,7 +58,7 @@ def _apply_platform_admin_password_recovery():
             admin.password_hash = hash_password(password)
         db.commit()
 
-    logging.getLogger(__name__).warning("Platform administrator recovery completed; remove recovery environment variables")
+    logger.warning("Platform administrator recovery completed; remove recovery environment variables")
 
 
 @app.on_event("startup")
@@ -230,19 +233,23 @@ async def login(request: Request, db: Session = Depends(get_db)):
         password = form.get("password")
     if not isinstance(username, str) or not isinstance(password, str):
         raise HTTPException(422, "Expected username and password fields")
-    user = db.scalar(select(User).where(User.email == username.lower()))
+    identity = username.strip()
+    user = db.scalar(select(User).where(
+        (User.email == identity.lower()) | (User.phone_e164 == identity)
+    ))
     if not user or not user.is_active or not verify_password(password, user.password_hash):
-        raise HTTPException(401, "Invalid email or password", headers={"WWW-Authenticate": "Bearer"})
+        raise HTTPException(401, "Invalid email/phone or password", headers={"WWW-Authenticate": "Bearer"})
     if user.clinic_id and (clinic := db.get(Clinic, user.clinic_id)) and clinic.status == "suspended":
         raise HTTPException(403, "This clinic account is suspended. Contact platform support.")
     refresh = create_refresh(db, user)
+    user.last_seen_at = datetime.now(timezone.utc)
     db.commit()
-    return {"access_token": access_token(user), "refresh_token": refresh, "token_type": "bearer", "user": {"id": str(user.id), "name": user.name, "email": user.email, "role": user.role.value, "clinic_id": str(user.clinic_id) if user.clinic_id else None}}
+    return {"access_token": access_token(user), "refresh_token": refresh, "token_type": "bearer", "user": {"id": str(user.id), "name": user.name, "email": user.email, "phone_e164": user.phone_e164, "designation": user.designation, "role": user.role.value, "clinic_id": str(user.clinic_id) if user.clinic_id else None}}
 
 
 @app.get("/api/auth/me")
 def auth_me(user: User = Depends(current_user)):
-    return {"id": str(user.id), "name": user.name, "email": user.email, "role": user.role.value, "clinic_id": str(user.clinic_id) if user.clinic_id else None, "admin_view": bool(getattr(user, "admin_view", False))}
+    return {"id": str(user.id), "name": user.name, "email": user.email, "phone_e164": user.phone_e164, "designation": user.designation, "role": user.role.value, "clinic_id": str(user.clinic_id) if user.clinic_id else None, "admin_view": bool(getattr(user, "admin_view", False))}
 
 
 def require_platform_admin(user: User):
@@ -257,7 +264,7 @@ def admin_clinics(user: User = Depends(current_user), db: Session = Depends(get_
     result = []
     for clinic in clinics:
         admin = db.scalar(select(User).where(User.clinic_id == clinic.id, User.role == Role.clinic_admin).order_by(User.created_at).limit(1))
-        result.append({"id": str(clinic.id), "name": clinic.name, "timezone": clinic.timezone, "status": clinic.status, "created_at": clinic.created_at, "admin_name": admin.name if admin else "—", "admin_email": admin.email if admin else "—"})
+        result.append({"id": str(clinic.id), "name": clinic.name, "timezone": clinic.timezone, "status": clinic.status, "created_at": clinic.created_at, "admin_name": admin.name if admin else "Not assigned", "admin_email": admin.email if admin else "Not assigned"})
     return result
 
 
@@ -287,7 +294,7 @@ def admin_create_clinic(body: AdminClinicCreateIn, user: User = Depends(current_
 
 
 @app.patch("/api/admin/clinics/{clinic_id}")
-def admin_update_clinic(clinic_id: uuid.UUID, status: str = Query(pattern="^(trial|active|suspended)$"), user: User = Depends(current_user), db: Session = Depends(get_db)):
+def admin_update_clinic(clinic_id: uuid.UUID, status: str = Query(pattern="^(active|suspended)$"), user: User = Depends(current_user), db: Session = Depends(get_db)):
     require_platform_admin(user)
     clinic = db.get(Clinic, clinic_id)
     if not clinic:
@@ -350,6 +357,62 @@ def clinic_admin_id(user: User) -> uuid.UUID:
     if user.role != Role.clinic_admin or not user.clinic_id:
         raise HTTPException(403, "Clinic administrator access required")
     return user.clinic_id
+
+
+@app.get("/api/clinic/members")
+def clinic_members(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    clinic_id = clinic_admin_id(user)
+    members = db.scalars(select(User).where(User.clinic_id == clinic_id).order_by(User.created_at)).all()
+    now = datetime.now(timezone.utc)
+    return [{
+        "id": str(member.id), "name": member.name, "email": member.email,
+        "phone_e164": member.phone_e164, "designation": member.designation or member.role.value.replace("_", " ").title(),
+        "role": member.role.value, "is_active": member.is_active,
+        "last_seen_at": member.last_seen_at,
+        "is_online": bool(member.is_active and member.last_seen_at and now - member.last_seen_at <= timedelta(minutes=2)),
+    } for member in members]
+
+
+@app.post("/api/clinic/members", status_code=201)
+def create_clinic_member(body: ClinicMemberCreateIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    clinic_id = clinic_admin_id(user)
+    phone = body.phone_e164.strip()
+    if db.scalar(select(User.id).where(User.phone_e164 == phone)):
+        raise HTTPException(409, "A user with this phone number already exists")
+    member = User(
+        clinic_id=clinic_id, name=body.name.strip(), phone_e164=phone,
+        designation=body.designation.strip(), password_hash=hash_password(body.password), role=Role.staff,
+    )
+    db.add(member)
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(409, "A user with this phone number already exists") from exc
+    db.refresh(member)
+    return {"id": str(member.id), "name": member.name, "phone_e164": member.phone_e164, "designation": member.designation, "role": member.role.value, "is_active": member.is_active, "is_online": False}
+
+
+@app.patch("/api/clinic/members/{member_id}")
+def set_clinic_member_active(member_id: uuid.UUID, active: bool = Query(), user: User = Depends(current_user), db: Session = Depends(get_db)):
+    clinic_id = clinic_admin_id(user)
+    member = db.scalar(select(User).where(User.id == member_id, User.clinic_id == clinic_id))
+    if not member:
+        raise HTTPException(404, "Clinic member not found")
+    if member.role == Role.clinic_admin:
+        raise HTTPException(400, "The clinic administrator account cannot be deactivated here")
+    member.is_active = active
+    db.commit()
+    return {"id": str(member.id), "is_active": member.is_active}
+
+
+@app.post("/api/clinic/presence", status_code=204)
+def update_presence(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    clinic_context(user)
+    member = db.get(User, user.id)
+    if member and (not member.last_seen_at or datetime.now(timezone.utc) - member.last_seen_at > timedelta(seconds=45)):
+        member.last_seen_at = datetime.now(timezone.utc)
+        db.commit()
 
 
 @app.get("/api/clinic/whatsapp")
@@ -440,7 +503,7 @@ async def send_whatsapp_test(body: WhatsAppTestMessageIn, user: User = Depends(c
 def patients(user: User = Depends(current_user), db: Session = Depends(get_db)):
     if user.role == Role.platform_admin or not user.clinic_id:
         raise HTTPException(403, "Patient access is not granted to this account")
-    rows = db.scalars(select(Patient).where(Patient.clinic_id == user.clinic_id, Patient.is_active.is_(True)).order_by(Patient.name).limit(100)).all()
+    rows = db.scalars(select(Patient).where(Patient.clinic_id == user.clinic_id, Patient.is_active.is_(True)).order_by(Patient.name)).all()
     schedule_rows = db.scalars(select(MedicationSchedule).where(
         MedicationSchedule.clinic_id == user.clinic_id,
         MedicationSchedule.patient_id.in_([p.id for p in rows]),
@@ -456,6 +519,78 @@ def clinic_context(user: User) -> uuid.UUID:
     if user.role == Role.platform_admin or not user.clinic_id:
         raise HTTPException(403, "Clinic context required")
     return user.clinic_id
+
+
+@app.get("/api/clinic/dashboard")
+def clinic_dashboard(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    clinic_id = clinic_context(user)
+    clinic = db.get(Clinic, clinic_id)
+    if not clinic:
+        raise HTTPException(404, "Clinic not found")
+
+    now = datetime.now(timezone.utc)
+    try:
+        clinic_zone = ZoneInfo(clinic.timezone)
+    except Exception as exc:
+        raise HTTPException(500, "Clinic timezone is invalid") from exc
+    local_today = now.astimezone(clinic_zone).date()
+    day_start = datetime.combine(local_today, time.min, tzinfo=clinic_zone).astimezone(timezone.utc)
+    day_end = datetime.combine(local_today + timedelta(days=1), time.min, tzinfo=clinic_zone).astimezone(timezone.utc)
+    reminder_today = (MedicationReminder.clinic_id == clinic_id, MedicationReminder.scheduled_for >= day_start, MedicationReminder.scheduled_for < day_end)
+
+    patient_count = db.scalar(select(func.count(Patient.id)).where(Patient.clinic_id == clinic_id, Patient.is_active.is_(True))) or 0
+    active_schedule_rows = db.execute(
+        select(MedicationSchedule.starts_on, MedicationSchedule.duration_days)
+        .join(Patient, Patient.id == MedicationSchedule.patient_id)
+        .where(
+            MedicationSchedule.clinic_id == clinic_id,
+            MedicationSchedule.is_active.is_(True),
+            Patient.is_active.is_(True),
+            MedicationSchedule.starts_on <= local_today,
+        )
+    ).all()
+    active_schedule_count = sum(
+        local_today < starts_on + timedelta(days=duration_days)
+        for starts_on, duration_days in active_schedule_rows
+    )
+    reminders_today = db.scalar(select(func.count(MedicationReminder.id)).where(*reminder_today)) or 0
+    delivered_today = db.scalar(select(func.count(MedicationReminder.id)).where(
+        *reminder_today, MedicationReminder.status.in_(("delivered", "read"))
+    )) or 0
+    responses_today = db.scalar(select(func.count(MedicationReminder.id)).where(
+        MedicationReminder.clinic_id == clinic_id,
+        MedicationReminder.responded_at >= day_start,
+        MedicationReminder.responded_at < day_end,
+        MedicationReminder.status.in_(("taken", "not_taken")),
+    )) or 0
+    needs_attention = db.scalar(select(func.count(MedicationReminder.id)).where(
+        MedicationReminder.clinic_id == clinic_id,
+        MedicationReminder.responded_at >= day_start,
+        MedicationReminder.responded_at < day_end,
+        MedicationReminder.status == "not_taken",
+    )) or 0
+    rows = db.execute(
+        select(MedicationReminder, Patient)
+        .join(Patient, Patient.id == MedicationReminder.patient_id)
+        .where(*reminder_today)
+        .order_by(MedicationReminder.scheduled_for)
+        .limit(8)
+    ).all()
+    return {
+        "clinic_name": clinic.name,
+        "patient_count": patient_count,
+        "active_schedule_count": active_schedule_count,
+        "reminders_today": reminders_today,
+        "delivered_today": delivered_today,
+        "responses_today": responses_today,
+        "needs_attention": needs_attention,
+        "reminders": [{
+            "id": str(reminder.id), "patient_name": patient.name,
+            "medicine_name": reminder.medicine_name,
+            "scheduled_for": reminder.scheduled_for,
+            "status": reminder.status,
+        } for reminder, patient in rows],
+    }
 
 
 def _patient_payload(patient: Patient, schedules: list[MedicationSchedule]):

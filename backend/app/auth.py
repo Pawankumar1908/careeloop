@@ -59,5 +59,5 @@ def current_user(token: str = Depends(oauth2), db: Session = Depends(get_db)) ->
         clinic = db.get(Clinic, clinic_id)
         if user.role.value != "platform_admin" or not clinic or clinic.status == "suspended":
             raise HTTPException(status_code=403, detail="Clinic access is unavailable")
-        return SimpleNamespace(id=user.id, name=user.name, email=user.email, role=Role.clinic_admin, clinic_id=clinic_id, is_active=True, admin_view=True)
+        return SimpleNamespace(id=user.id, name=user.name, email=user.email, phone_e164=user.phone_e164, designation=user.designation, role=Role.clinic_admin, clinic_id=clinic_id, is_active=True, admin_view=True)
     return user

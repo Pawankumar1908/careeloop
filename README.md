@@ -90,7 +90,7 @@ python -m app.bootstrap_admin --name "Platform Admin" --email "admin@example.com
 
 Enter a password of at least 12 characters when prompted. Sign in at the frontend with this account, then use **Add a clinic** to create a clinic workspace and its clinic administrator account. Give the clinic administrator the email and password securely. Clinic accounts sign in on the same page and enter their clinic workspace. Platform administrators can list clinics and suspend or reactivate clinic accounts; suspended clinic users cannot sign in. Public clinic registration is disabled.
 
-Login is `POST /api/auth/login` using form fields `username` (email) and `password`; authenticated APIs accept the returned bearer token. `POST /api/auth/refresh` rotates the refresh token; logout revokes its token family. Platform clinic management is available through `GET` and `POST /api/admin/clinics` and `PATCH /api/admin/clinics/{clinic_id}?status=active|trial|suspended` (platform-admin role required).
+Login is `POST /api/auth/login` using form fields `username` (email or clinic member phone number) and `password`; authenticated APIs accept the returned bearer token. `POST /api/auth/refresh` rotates the refresh token; logout revokes its token family. Platform clinic management is available through `GET` and `POST /api/admin/clinics` and `PATCH /api/admin/clinics/{clinic_id}?status=active|suspended` (platform-admin role required). Clinic administrators can list and create members through `GET` and `POST /api/clinic/members`, suspend or reactivate members through `PATCH /api/clinic/members/{member_id}?active=true|false`, and update presence through `POST /api/clinic/presence`.
 
 ## Foundation API
 

@@ -24,7 +24,7 @@ class Clinic(Base):
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(200))
     timezone: Mapped[str] = mapped_column(String(64), default="Asia/Kolkata")
-    status: Mapped[str] = mapped_column(String(24), default="trial")
+    status: Mapped[str] = mapped_column(String(24), default="active")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     users: Mapped[list["User"]] = relationship(back_populates="clinic")
 
@@ -35,10 +35,13 @@ class User(Base):
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     clinic_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("clinics.id", ondelete="CASCADE"), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(160))
-    email: Mapped[str] = mapped_column(String(320), index=True)
+    email: Mapped[str | None] = mapped_column(String(320), index=True, nullable=True)
+    phone_e164: Mapped[str | None] = mapped_column(String(16), unique=True, nullable=True)
+    designation: Mapped[str | None] = mapped_column(String(80), nullable=True)
     password_hash: Mapped[str] = mapped_column(String(255))
     role: Mapped[Role] = mapped_column(Enum(Role, native_enum=False), default=Role.staff)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     clinic: Mapped[Clinic | None] = relationship(back_populates="users")
 

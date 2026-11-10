@@ -18,6 +18,13 @@ class AdminClinicCreateIn(BaseModel):
     password: str = Field(min_length=12, max_length=128)
 
 
+class ClinicMemberCreateIn(BaseModel):
+    name: str = Field(min_length=1, max_length=160)
+    designation: str = Field(min_length=2, max_length=80)
+    phone_e164: str = Field(min_length=9, max_length=16, pattern=r"^\+[1-9]\d{7,14}$")
+    password: str = Field(min_length=12, max_length=128)
+
+
 class AdminClinicOut(BaseModel):
     id: str
     name: str
@@ -31,7 +38,9 @@ class AdminClinicOut(BaseModel):
 class UserOut(BaseModel):
     id: str
     name: str
-    email: str
+    email: str | None
+    phone_e164: str | None = None
+    designation: str | None = None
     role: str
     clinic_id: str | None
 
