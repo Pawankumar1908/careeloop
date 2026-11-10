@@ -16,7 +16,7 @@ const errorText = detail => {
 const sectionData = {
   Appointments: { description: 'Appointment tracking will show saved clinic records here once configured.' },
   'Follow-ups': { description: 'Follow-up tracking will show clinic records here once configured.' },
-  Reports: { description: 'Reports will be generated from the clinic's recorded activity.' },
+  Reports: { description: "Reports will be generated from the clinic's recorded activity." },
   'Staff & permissions': { description: 'Clinic staff accounts and permissions.' },
   'Clinic settings': { description: 'Clinic profile and workspace settings.' },
 };
