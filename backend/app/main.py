@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import json
 import logging
+import os
 import uuid
 from datetime import datetime, time, timedelta, timezone
 from functools import lru_cache
@@ -29,8 +30,27 @@ app = FastAPI(title="ClinicCare API", version="0.1.0")
 app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origin_list, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 
+def _apply_platform_admin_password_recovery():
+    email = os.getenv("CARELOOP_ADMIN_RESET_EMAIL", "").strip().lower()
+    password = os.getenv("CARELOOP_ADMIN_RESET_PASSWORD", "")
+    if not email and not password:
+        return
+    if not email or len(password) < 12:
+        raise RuntimeError("Admin password recovery requires an email and a password of at least 12 characters")
+
+    with SessionLocal() as db:
+        admin = db.scalar(select(User).where(User.email == email, User.role == Role.platform_admin))
+        if not admin:
+            raise RuntimeError("Admin password recovery account was not found")
+        admin.password_hash = hash_password(password)
+        db.commit()
+
+    logging.getLogger(__name__).warning("Platform administrator password recovery completed; remove recovery environment variables")
+
+
 @app.on_event("startup")
 async def start_medication_reminder_worker():
+    _apply_platform_admin_password_recovery()
     app.state.medication_reminder_worker = asyncio.create_task(_medication_reminder_worker())
 
 
