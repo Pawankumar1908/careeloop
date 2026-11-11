@@ -23,7 +23,7 @@ from app.auth import access_token, create_refresh, current_user, hash_password, 
 from app.config import settings
 from app.db import SessionLocal, get_db
 from app.models import Clinic, ClinicAppointment, MedicationReminder, MedicationSchedule, Patient, RefreshSession, Role, User, WhatsAppConnection
-from app.schemas import AdminClinicCreateIn, AppointmentCreateIn, ClinicMemberCreateIn, MedicationScheduleIn, PatientCreateIn, RegisterIn, WhatsAppConnectIn, WhatsAppTestMessageIn
+from app.schemas import AdminClinicCreateIn, AppointmentCreateIn, AppointmentUpdateIn, ClinicMemberCreateIn, MedicationScheduleIn, PatientCreateIn, RegisterIn, WhatsAppConnectIn, WhatsAppTestMessageIn
 from app.whatsapp_service import WhatsAppAPIError, decrypt_access_token, encrypt_access_token, get_phone_details, send_appointment_reminder, send_medication_reminder, send_test_template
 
 app = FastAPI(title="ClinicCare API", version="0.1.0")
@@ -147,12 +147,16 @@ def _process_whatsapp_webhook(payload: dict, db: Session):
                     MedicationReminder.whatsapp_message_id == status_event.get("id"),
                     MedicationReminder.clinic_id == connection.clinic_id,
                 ))
-                if not reminder or reminder.status in {"taken", "not_taken"}:
-                    continue
                 status = status_event.get("status")
-                if status in {"sent", "delivered", "read", "failed"}:
+                if reminder and reminder.status not in {"taken", "not_taken"} and status in {"sent", "delivered", "read", "failed"}:
                     if status == "failed" or reminder.status == "pending" or status == "read" or (status == "delivered" and reminder.status == "sent"):
                         reminder.status = status
+                appointment = db.scalar(select(ClinicAppointment).where(
+                    ClinicAppointment.confirmation_message_id == status_event.get("id"),
+                    ClinicAppointment.clinic_id == connection.clinic_id,
+                ))
+                if appointment and appointment.confirmation_status not in {"coming", "not_coming"} and status in {"sent", "delivered", "read", "failed"}:
+                    appointment.confirmation_status = status
             for message in value.get("messages", []):
                 button = message.get("button", {})
                 reply_payload = button.get("payload")
@@ -162,25 +166,39 @@ def _process_whatsapp_webhook(payload: dict, db: Session):
                 if not isinstance(reply_payload, str) or ":" not in reply_payload:
                     continue
                 answer, reminder_text = reply_payload.split(":", 1)
-                if answer not in {"taken", "not_taken"}:
+                if answer not in {"taken", "not_taken", "coming", "not_coming"}:
                     continue
                 try:
                     reminder_id = uuid.UUID(reminder_text)
                 except ValueError:
                     continue
-                reminder = db.get(MedicationReminder, reminder_id)
-                if not reminder or reminder.clinic_id != connection.clinic_id or reminder.status in {"taken", "not_taken"}:
-                    continue
-                patient = db.get(Patient, reminder.patient_id)
-                sender = message.get("from", "")
-                if not patient or sender != patient.phone_e164.lstrip("+"):
-                    continue
                 try:
                     replied_at = datetime.fromtimestamp(int(message.get("timestamp", "0")), timezone.utc)
                 except (TypeError, ValueError, OSError):
                     replied_at = datetime.now(timezone.utc)
-                reminder.status = answer
-                reminder.responded_at = replied_at
+                if answer in {"taken", "not_taken"}:
+                    reminder = db.get(MedicationReminder, reminder_id)
+                    if not reminder or reminder.clinic_id != connection.clinic_id or reminder.status in {"taken", "not_taken"}:
+                        continue
+                    patient = db.get(Patient, reminder.patient_id)
+                    if not patient or message.get("from", "") != patient.phone_e164.lstrip("+"):
+                        continue
+                    reminder.status = answer
+                    reminder.responded_at = replied_at
+                else:
+                    appointment = db.scalar(select(ClinicAppointment).where(
+                        ClinicAppointment.id == reminder_id,
+                        ClinicAppointment.clinic_id == connection.clinic_id,
+                        ClinicAppointment.confirmation_status.in_(("pending", "sent", "delivered", "read")),
+                        ClinicAppointment.status.in_(("scheduled", "confirmed")),
+                    ))
+                    if not appointment:
+                        continue
+                    patient = db.get(Patient, appointment.patient_id)
+                    if not patient or message.get("from", "") != patient.phone_e164.lstrip("+"):
+                        continue
+                    appointment.confirmation_status = answer
+                    appointment.confirmation_responded_at = replied_at
 
 
 @app.get("/api/medicines/search")
@@ -589,6 +607,9 @@ def clinic_appointments(
         "reminder_status": appointment.reminder_status,
         "reminder_sent_at": appointment.reminder_sent_at,
         "reminder_error": appointment.reminder_error,
+        "confirmation_status": appointment.confirmation_status,
+        "confirmation_responded_at": appointment.confirmation_responded_at,
+        "attendance_status": appointment.attendance_status,
     } for appointment, patient in rows]
 
 
@@ -617,6 +638,7 @@ def create_clinic_appointment(body: AppointmentCreateIn, user: User = Depends(cu
         starts_at=starts_at, notes=body.notes.strip() or None, status="scheduled",
         reminder_minutes_before=body.reminder_minutes_before,
         reminder_status="pending" if body.reminder_minutes_before is not None else "not_requested",
+        confirmation_status="pending" if body.reminder_minutes_before is not None else "not_requested",
         created_by_id=user.id,
     )
     db.add(appointment)
@@ -626,23 +648,39 @@ def create_clinic_appointment(body: AppointmentCreateIn, user: User = Depends(cu
             "title": appointment.title, "starts_at": appointment.starts_at,
             "notes": appointment.notes or "", "status": appointment.status,
             "reminder_minutes_before": appointment.reminder_minutes_before,
-            "reminder_status": appointment.reminder_status}
+            "reminder_status": appointment.reminder_status,
+            "confirmation_status": appointment.confirmation_status,
+            "attendance_status": appointment.attendance_status}
 
 
 @app.patch("/api/clinic/appointments/{appointment_id}")
-def update_clinic_appointment(appointment_id: uuid.UUID, status: str = Query(pattern="^(scheduled|confirmed|completed|cancelled)$"), user: User = Depends(current_user), db: Session = Depends(get_db)):
+def update_clinic_appointment(appointment_id: uuid.UUID, body: AppointmentUpdateIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     clinic_id = clinic_context(user)
     appointment = db.scalar(select(ClinicAppointment).where(
         ClinicAppointment.id == appointment_id, ClinicAppointment.clinic_id == clinic_id
     ))
     if not appointment:
         raise HTTPException(404, "Appointment not found")
-    appointment.status = status
-    if status in {"completed", "cancelled"} and appointment.reminder_status == "pending":
-        appointment.reminder_status = "skipped"
-        appointment.reminder_error = "Appointment was closed before the reminder was sent."
+    if body.status is None and body.attendance_status is None:
+        raise HTTPException(422, "Provide an appointment status or attendance status")
+    if body.status is not None:
+        appointment.status = body.status
+    if body.attendance_status is not None:
+        clinic = db.get(Clinic, clinic_id)
+        local_today = datetime.now(ZoneInfo(clinic.timezone)).date()
+        if appointment.starts_at.astimezone(ZoneInfo(clinic.timezone)).date() >= local_today:
+            raise HTTPException(422, "Attendance can only be recorded for past appointment dates")
+        if appointment.status == "cancelled":
+            raise HTTPException(409, "Cancelled appointments cannot be marked as attended or missed")
+        appointment.attendance_status = body.attendance_status
+    if body.status in {"completed", "cancelled"}:
+        if appointment.reminder_status == "pending":
+            appointment.reminder_status = "skipped"
+            appointment.reminder_error = "Appointment was closed before the reminder was sent."
+        if appointment.confirmation_status in {"pending", "sent", "delivered", "read"}:
+            appointment.confirmation_status = "skipped"
     db.commit()
-    return {"id": str(appointment.id), "status": appointment.status, "reminder_status": appointment.reminder_status, "reminder_error": appointment.reminder_error}
+    return {"id": str(appointment.id), "status": appointment.status, "reminder_status": appointment.reminder_status, "reminder_error": appointment.reminder_error, "confirmation_status": appointment.confirmation_status, "attendance_status": appointment.attendance_status}
 
 
 @app.get("/api/clinic/dashboard")
@@ -856,6 +894,7 @@ async def _dispatch_due_appointment_reminders():
             if appointment.starts_at <= now:
                 appointment.reminder_status = "skipped"
                 appointment.reminder_error = "Appointment time passed before the reminder could be sent."
+                appointment.confirmation_status = "skipped"
                 db.commit()
                 continue
             send_at = appointment.starts_at - timedelta(minutes=appointment.reminder_minutes_before or 0)
@@ -866,6 +905,7 @@ async def _dispatch_due_appointment_reminders():
             if not patient or not patient.is_active or patient.consent_status != "opted_in":
                 appointment.reminder_status = "skipped"
                 appointment.reminder_error = "Patient has not consented to WhatsApp reminders."
+                appointment.confirmation_status = "skipped"
                 db.commit()
                 continue
             connection = db.scalar(select(WhatsAppConnection).where(WhatsAppConnection.clinic_id == appointment.clinic_id))
@@ -877,16 +917,19 @@ async def _dispatch_due_appointment_reminders():
                 token = decrypt_access_token(connection.encrypted_access_token)
                 result = await send_appointment_reminder(
                     connection.phone_number_id, token, patient.phone_e164.lstrip("+"),
-                    patient.name, appointment.title, appointment_time,
+                    patient.name, appointment.title, appointment_time, str(appointment.id),
                 )
                 message = (result.get("messages") or [{}])[0]
                 appointment.reminder_status = "sent"
                 appointment.reminder_sent_at = datetime.now(timezone.utc)
                 appointment.reminder_message_id = message.get("id")
                 appointment.reminder_error = None
+                appointment.confirmation_status = "sent"
+                appointment.confirmation_message_id = message.get("id")
             except Exception as exc:
                 appointment.reminder_status = "failed"
                 appointment.reminder_error = str(exc)[:2000]
+                appointment.confirmation_status = "failed"
                 logger.exception("WhatsApp appointment reminder send failed")
             db.commit()
 

@@ -33,6 +33,11 @@ class AppointmentCreateIn(BaseModel):
     reminder_minutes_before: int | None = Field(default=None, ge=15, le=10080)
 
 
+class AppointmentUpdateIn(BaseModel):
+    status: str | None = Field(default=None, pattern=r"^(scheduled|confirmed|completed|cancelled)$")
+    attendance_status: str | None = Field(default=None, pattern=r"^(unmarked|attended|missed)$")
+
+
 class AdminClinicOut(BaseModel):
     id: str
     name: str

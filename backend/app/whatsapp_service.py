@@ -161,6 +161,7 @@ async def send_appointment_reminder(
     patient_name: str,
     appointment_title: str,
     appointment_time: str,
+    appointment_id: str,
 ) -> dict:
     payload = {
         "messaging_product": "whatsapp",
@@ -169,11 +170,19 @@ async def send_appointment_reminder(
         "template": {
             "name": settings.whatsapp_appointment_template_name,
             "language": {"code": settings.whatsapp_template_language},
-            "components": [{"type": "body", "parameters": [
-                {"type": "text", "text": patient_name},
-                {"type": "text", "text": appointment_title},
-                {"type": "text", "text": appointment_time},
-            ]}],
+            "components": [
+                {"type": "body", "parameters": [
+                    {"type": "text", "text": patient_name},
+                    {"type": "text", "text": appointment_title},
+                    {"type": "text", "text": appointment_time},
+                ]},
+                {"type": "button", "sub_type": "quick_reply", "index": "0", "parameters": [
+                    {"type": "payload", "payload": f"coming:{appointment_id}"},
+                ]},
+                {"type": "button", "sub_type": "quick_reply", "index": "1", "parameters": [
+                    {"type": "payload", "payload": f"not_coming:{appointment_id}"},
+                ]},
+            ],
         },
     }
     try:
