@@ -22,6 +22,17 @@ const sectionData = {
 };
 const pathFor = (label) => label === 'Overview' ? '/' : `/${label.toLowerCase().replaceAll(' & ', '-').replaceAll(' ', '-')}`;
 const labelFor = (pathname) => nav.flatMap(group => group.links.map(([label]) => [pathFor(label), label])).find(([path]) => pathname === path || (path !== '/' && pathname.startsWith(`${path}/`)))?.[1] || 'Overview';
+const clinicDateKey = (value,timeZone='Asia/Kolkata') => {
+  const parts=new Intl.DateTimeFormat('en-CA',{timeZone,year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(value instanceof Date?value:new Date(value));
+  const part=Object.fromEntries(parts.map(item=>[item.type,item.value]));
+  return `${part.year}-${part.month}-${part.day}`;
+};
+const clinicDateTimeInput = (value,timeZone='Asia/Kolkata') => {
+  const parts=new Intl.DateTimeFormat('en-CA',{timeZone,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(value);
+  const part=Object.fromEntries(parts.map(item=>[item.type,item.value]));
+  return `${part.year}-${part.month}-${part.day}T${part.hour}:${part.minute}`;
+};
+const clinicDateTimeLabel = (value,timeZone='Asia/Kolkata') => new Intl.DateTimeFormat('en-IN',{timeZone,dateStyle:'medium',timeStyle:'short'}).format(new Date(value));
 
 async function rotateSession(session) {
   if (!session.refresh_token) throw new Error('Your session has expired. Please sign in again.');
@@ -99,6 +110,7 @@ function App() {
     const saved = {
       id: result.id, name: result.name, phone: result.phone_e164,
       language: result.preferred_language, consent: result.consent, active: result.is_active,
+      nextAppointment: patient.nextAppointment,
       medications: result.medications.map(item => ({
         id: item.id, name: item.name, frequency: item.frequency, foodTiming: item.food_timing,
         durationDays: String(item.duration_days), reminderTimes: item.reminder_times,
@@ -106,6 +118,13 @@ function App() {
     };
     setPatients(current => current.some(item => item.id === saved.id) ? current.map(item => item.id === saved.id ? saved : item) : [...current, saved]);
     return saved;
+  };
+  const updateNextAppointment = (patientId, appointment) => {
+    setPatients(current => current.map(patient => {
+      if (patient.id !== patientId) return patient;
+      const currentTime = patient.nextAppointment ? new Date(patient.nextAppointment.starts_at).getTime() : Infinity;
+      return new Date(appointment.starts_at).getTime() < currentTime ? { ...patient, nextAppointment: appointment } : patient;
+    }));
   };
   useEffect(() => {
     const platformStored = window.sessionStorage.getItem('careloop-platform-session');
@@ -183,6 +202,7 @@ function App() {
       .then(rows => setPatients(rows.map(patient => ({
         id: patient.id, name: patient.name, phone: patient.phone_e164,
         language: patient.preferred_language, consent: patient.consent, active: patient.is_active,
+        nextAppointment: patient.next_appointment,
         medications: patient.medications.map(item => ({
           id: item.id, name: item.name, frequency: item.frequency,
           foodTiming: item.food_timing, durationDays: String(item.duration_days),
@@ -192,7 +212,7 @@ function App() {
       .catch(error => { if (error.name !== 'AbortError') { setPatients([]); setPatientsError('Could not load patient records.'); } })
       .finally(() => { if (!controller.signal.aborted) setPatientsLoading(false); });
     return () => controller.abort();
-  }, [auth]);
+  }, [auth, active]);
   const acceptLogin = (session) => { window.sessionStorage.setItem('careloop-auth-session', JSON.stringify(session)); setAuth(session); };
   const signOut = () => {
     const refresh = auth?.refresh_token || adminSession?.refresh_token;
@@ -224,7 +244,7 @@ function App() {
     </aside>
     <main className="main-content"><header className="topbar"><button className="icon-button menu-toggle" onClick={() => setOpen(true)} aria-label="Open navigation"><Menu size={21}/></button><div className="crumb">Workspace <span>/</span> <b>{active}</b></div><div className="top-actions"><div className="searchbox"><Search size={16}/><input placeholder="Search sections..." aria-label="Search sections" onKeyDown={event => { if (event.key === "Enter") { const term=event.currentTarget.value.trim().toLowerCase(); const match=nav.flatMap(group=>group.links.map(([label])=>label)).find(label=>label.toLowerCase().includes(term)); if(match){navigate(pathFor(match));event.currentTarget.value="";} } }}/><kbd>Enter</kbd></div><div className="text-size-controls" aria-label="Text size controls"><button type="button" onClick={() => adjustTextSize(-0.1)} disabled={textScale <= 0.8} aria-label="Decrease text size" title="Decrease text size">A-</button><button type="button" onClick={() => adjustTextSize(0.1)} disabled={textScale >= 1.3} aria-label="Increase text size" title="Increase text size">A+</button></div><button className="icon-button notify" aria-label="Notifications" title="Open messages" onClick={() => navigate(pathFor("WhatsApp messages"))}><Bell size={19}/><i/></button><div className="profile-menu"><button className="top-user top-user-button" onClick={() => setProfileOpen(current => !current)} aria-haspopup="menu" aria-expanded={profileOpen} aria-label="Open account menu" title="Account menu"><div className="avatar avatar-user">{auth.user.name.slice(0,2).toUpperCase()}</div><ChevronDown size={15}/></button>{profileOpen && <div className="profile-dropdown" role="menu"><div className="profile-details"><b>{auth.user.name}</b><span>{auth.user.email || auth.user.phone_e164}</span></div><button role="menuitem" onClick={signOut}>Sign out</button></div>}</div></div></header>
       {auth.user.admin_view && <div className="demo-notice admin-view-notice"><ShieldCheck size={16}/><span>Platform admin access to {clinic?.name || 'this clinic'}.</span><button className="secondary-button" onClick={returnToPlatform}>Return to platform admin</button></div>}
-      <div className="page-wrap">{active === 'Patients' && <PatientsPage patients={patients} loading={patientsLoading} error={patientsError} onSave={savePatient}/>} {(active === 'Medication schedules' || active === 'WhatsApp messages') && <MedicationActivityPage active={active} auth={auth}/>} {active === 'WhatsApp settings' && <WhatsAppSettingsPage auth={auth}/>} {active === 'Staff & permissions' && <StaffPage auth={auth}/>} {active !== 'Overview' && active !== 'Patients' && active !== 'Medication schedules' && active !== 'WhatsApp messages' && active !== 'WhatsApp settings' && active !== 'Staff & permissions' && <WorkspacePage key={active} active={active}/>} {active === 'Overview' && <><div className="welcome-row"><div><div className="eyebrow"><span className="live-dot"/> {dateLabel}</div><h1>{greeting}, {auth.user.admin_view ? (clinic?.name || auth.user.name) : auth.user.name}</h1><p>Here's what's happening at your clinic today.</p></div><div className="date-button"><CalendarDays size={16}/> {today.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</div></div>
+      <div className="page-wrap">{active === 'Patients' && <PatientsPage auth={auth} patients={patients} loading={patientsLoading} error={patientsError} onSave={savePatient} onAppointmentCreated={updateNextAppointment} clinicTimezone={clinic?.timezone||'Asia/Kolkata'}/>} {active === 'Appointments' && <AppointmentsPage auth={auth} patients={patients} clinicTimezone={clinic?.timezone||'Asia/Kolkata'}/> } {(active === 'Medication schedules' || active === 'WhatsApp messages') && <MedicationActivityPage active={active} auth={auth}/>} {active === 'WhatsApp settings' && <WhatsAppSettingsPage auth={auth}/>} {active === 'Staff & permissions' && <StaffPage auth={auth}/>} {active !== 'Overview' && active !== 'Patients' && active !== 'Appointments' && active !== 'Medication schedules' && active !== 'WhatsApp messages' && active !== 'WhatsApp settings' && active !== 'Staff & permissions' && <WorkspacePage key={active} active={active}/>} {active === 'Overview' && <><div className="welcome-row"><div><div className="eyebrow"><span className="live-dot"/> {dateLabel}</div><h1>{greeting}, {auth.user.admin_view ? (clinic?.name || auth.user.name) : auth.user.name}</h1><p>Here's what's happening at your clinic today.</p></div><div className="date-button"><CalendarDays size={16}/> {today.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</div></div>
         {dashboardError&&<p className="auth-error" role="alert">{dashboardError}</p>}
         <div className="metric-grid"><Metric icon={Users} label="Total patients" number={dashboardLoading?'—':dashboard?.patient_count ?? '—'} note="registered in this clinic" tone="teal"/><Metric icon={Pill} label="Active schedules" number={dashboardLoading?'—':dashboard?.active_schedule_count ?? '—'} note="currently active" tone="purple"/><Metric icon={MessageCircle} label="Messages delivered today" number={dashboardLoading?'—':dashboard?.delivered_today ?? '—'} note={dashboardLoading?'Loading activity':`${dashboard?.reminders_today ?? '—'} reminders scheduled today`} tone="blue"/><Metric icon={CircleAlert} label="Needs attention" number={dashboardLoading?'—':dashboard?.needs_attention ?? '—'} note="patient replies marked not taken" tone="amber" alert={dashboard?.needs_attention > 0}/></div>
         <div className="content-grid"><section className="panel reminders-panel"><div className="panel-heading"><div><h2>Today's reminders</h2><p>Live medication reminder activity for this clinic</p></div><button className="text-link" onClick={() => navigate(pathFor("Medication schedules"))}>View all <ArrowUpRight size={14}/></button></div><div className="reminder-summary"><span><i className="legend-dot teal-dot"/> {dashboardLoading?'—':dashboard?.reminders_today ?? '—'} scheduled</span><span><i className="legend-dot gray-dot"/> {dashboardLoading?'—':dashboard?.delivered_today ?? '—'} delivered</span></div><div className="reminder-list">{(dashboard?.reminders || []).map(reminder=><div className="reminder-row" key={reminder.id}><div className="avatar avatar-mint">{reminder.patient_name.slice(0,2).toUpperCase()}</div><div className="reminder-person"><b>{reminder.patient_name}</b><span>Medication reminder - {reminder.medicine_name}</span></div><span className="reminder-time">{new Date(reminder.scheduled_for).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})}</span><span className={`status status-${reminder.status.replaceAll('_','-')}`}><i/>{reminder.status.replaceAll('_',' ')}</span></div>)}{dashboardLoading && <div className="empty-row">Loading reminders...</div>}{dashboardError && <div className="empty-row">Reminder data is unavailable.</div>}{dashboard && dashboard.reminders.length===0 && <div className="empty-row">No reminders scheduled today.</div>}</div><button className="panel-footer" onClick={() => navigate(pathFor("Medication schedules"))}>See reminder activity <ArrowUpRight size={14}/></button></section>
@@ -251,7 +271,7 @@ function LoginPage({onLogin}) {
     } catch (err) { setError(err.message==='Failed to fetch'?'Cannot reach the server. Start the backend, then try again.':err.message); }
     finally { setBusy(false); }
   };
-  return <main className="auth-screen"><section className="auth-card"><div className="auth-brand"><span className="brand-icon"><Activity size={21}/></span><div><b>careloop</b><small>CLINIC WORKSPACE</small></div></div><p className="eyebrow">SECURE SIGN IN</p><h1>Welcome back</h1><p className="auth-intro">Sign in with your platform administrator or clinic account.</p><form onSubmit={submit}><label htmlFor="login-email">Email address or phone number<input id="login-email" name="username" required type="text" autoComplete="username" value={email} onChange={event=>setEmail(event.target.value)} placeholder="admin@clinic.com or +919876543210"/></label><label htmlFor="login-password">Password<div className="password-input-wrap"><input id="login-password" name="password" required type={showPassword?'text':'password'} autoComplete="current-password" value={password} onChange={event=>setPassword(event.target.value)}/><button className="password-visibility" type="button" onClick={()=>setShowPassword(current=>!current)} aria-label={showPassword?'Hide password':'Show password'} aria-pressed={showPassword} title={showPassword?'Hide password':'Show password'}>{showPassword?<EyeOff size={17}/>:<Eye size={17}/>}</button></div></label>{error&&<p className="auth-error" role="alert">{error}</p>}<button className="primary-button" disabled={busy}>{busy?'Signing in...':'Sign in'}</button></form><small className="auth-footnote">Clinic accounts are created by the Careloop platform administrator or clinic admin.</small></section></main>;
+  return <main className="auth-screen"><section className="auth-card"><div className="auth-brand"><span className="brand-icon"><Activity size={21}/></span><div><b>careloop</b><small>CLINIC WORKSPACE</small></div></div><p className="eyebrow">SECURE SIGN IN</p><h1>Welcome back</h1><p className="auth-intro">Sign in with your platform administrator or clinic account.</p><form onSubmit={submit}><label htmlFor="login-email">Email address or phone number<input id="login-email" name="username" required type="text" autoComplete="username" value={email} onChange={event=>setEmail(event.target.value)}/></label><label htmlFor="login-password">Password<div className="password-input-wrap"><input id="login-password" name="password" required type={showPassword?'text':'password'} autoComplete="current-password" value={password} onChange={event=>setPassword(event.target.value)}/><button className="password-visibility" type="button" onClick={()=>setShowPassword(current=>!current)} aria-label={showPassword?'Hide password':'Show password'} aria-pressed={showPassword} title={showPassword?'Hide password':'Show password'}>{showPassword?<EyeOff size={17}/>:<Eye size={17}/>}</button></div></label>{error&&<p className="auth-error" role="alert">{error}</p>}<button className="primary-button" disabled={busy}>{busy?'Signing in...':'Sign in'}</button></form><small className="auth-footnote">Clinic accounts are created by the Careloop platform administrator or clinic admin.</small></section></main>;
 }
 function AdminPortal({auth,onLogout,onOpenClinic}) {
   const [clinics,setClinics] = useState([]);
@@ -322,7 +342,7 @@ function AdminPortal({auth,onLogout,onOpenClinic}) {
   </div>;
 }
 function Metric({icon:Icon,label,number,note,tone,alert}) {return <section className="metric-card"><div className="metric-top"><span className={`metric-icon icon-${tone}`}><Icon size={18}/></span>{alert&&<span className="attention-label"><CircleAlert size={13}/></span>}</div><div className="metric-number">{number}</div><div className="metric-label">{label}</div><div className="metric-note">{note}</div></section>}
-function PatientsPage({patients,onSave,loading,error}) {
+function PatientsPage({auth,patients,onSave,onAppointmentCreated,clinicTimezone='Asia/Kolkata',loading,error}) {
   const location = useLocation();
   const navigate = useNavigate();
   const [query,setQuery] = useState('');
@@ -334,11 +354,27 @@ function PatientsPage({patients,onSave,loading,error}) {
   const [phoneError,setPhoneError] = useState('');
   const [formError,setFormError] = useState('');
   const [saving,setSaving] = useState(false);
+  const [appointmentForm,setAppointmentForm] = useState({title:'Follow-up consultation',starts_at:'',reminder_minutes_before:''});
+  const [appointmentSaving,setAppointmentSaving] = useState(false);
+  const [appointmentError,setAppointmentError] = useState('');
+  const [appointmentNotice,setAppointmentNotice] = useState('');
   useEffect(()=>{setForm(selected ? {...selected,medications:(selected.medications||[]).map(item=>({id:item.id,name:item.name||'',frequency:item.frequency||'',foodTiming:item.foodTiming||'',durationDays:item.durationDays||'',reminderTimes:item.reminderTimes||[]}))} : blank);setPhoneError('');setFormError('');},[location.pathname,selected?.id]);
   const editing = Boolean(selected);
   const update = (field,value) => setForm(current=>({...current,[field]:value}));
   const updateMedication = (index,field,value) => setForm(current=>({...current,medications:current.medications.map((item,i)=>i===index?{...item,[field]:value}:item)}));
   const updateReminderTime = (index,timeIndex,value) => setForm(current=>({...current,medications:current.medications.map((item,i)=>i===index?{...item,reminderTimes:item.reminderTimes.map((time,j)=>j===timeIndex?value:time)}:item)}));
+  const schedulePatientAppointment = async event => {
+    event.preventDefault();setAppointmentSaving(true);setAppointmentError('');setAppointmentNotice('');
+    try {
+      const response=await fetch(`${API_BASE}/api/clinic/appointments`,{method:'POST',headers:{Authorization:`Bearer ${auth.access_token}`,'Content-Type':'application/json'},body:JSON.stringify({patient_id:selected.id,title:appointmentForm.title,starts_at:appointmentForm.starts_at,notes:'',reminder_minutes_before:appointmentForm.reminder_minutes_before===''?null:Number(appointmentForm.reminder_minutes_before)})});
+      const result=await response.json();
+      if(!response.ok)throw new Error(result.detail||'Could not schedule this appointment.');
+      onAppointmentCreated(selected.id,result);
+      setAppointmentNotice('Appointment saved. It is also listed in Appointments.');
+      setAppointmentForm(current=>({...current,starts_at:''}));
+    } catch(err) {setAppointmentError(err.message);}
+    finally {setAppointmentSaving(false);}
+  };
   const addPresetReminderTime = (index,value) => setForm(current=>({...current,medications:current.medications.map((item,i)=>{
     if(i!==index||item.reminderTimes.includes(value)) return item;
     const times=item.reminderTimes.filter(Boolean);
@@ -354,6 +390,7 @@ function PatientsPage({patients,onSave,loading,error}) {
     <form className="panel patient-form-panel" onSubmit={submit}>
       <div className="form-section-heading"><h2>Patient details</h2><p>Collect only information needed for clinic communication.</p></div>
       <div className="patient-fields"><label>Patient name<input required maxLength={160} value={form.name} onChange={event=>update('name',event.target.value)} placeholder="Full name"/></label><label>WhatsApp number<input required inputMode="tel" maxLength={16} value={form.phone} onChange={event=>{update('phone',event.target.value);setPhoneError('');}} onBlur={event=>update('phone',event.target.value.trim())} aria-invalid={Boolean(phoneError)} aria-describedby="phone-validation" placeholder="+919876543210"/><small id="phone-validation" className={phoneError?'field-error':''}>{phoneError||'Enter the full number with + and country code.'}</small></label><label>Preferred language<select value={form.language} onChange={event=>update('language',event.target.value)}><option>English</option><option>Hindi</option><option>Marathi</option><option>Tamil</option><option>Other</option></select></label></div>
+      {editing&&<><section className="patient-next-appointment"><div><b>Next appointment</b><span>{selected.nextAppointment?`${selected.nextAppointment.title} · ${clinicDateTimeLabel(selected.nextAppointment.starts_at,clinicTimezone)}`:'No upcoming appointment scheduled'}</span><small>{selected.nextAppointment?.reminder_status==='sent'?'WhatsApp reminder sent':selected.nextAppointment?.reminder_status==='pending'?'Appointment reminder is scheduled':selected.nextAppointment?.reminder_status==='failed'?'Appointment reminder failed to send':''}</small></div><button type="button" className="secondary-button" onClick={()=>navigate(`/appointments?${new URLSearchParams({patient:selected.id,return:location.pathname})}`)}>View calendar</button></section><section className="patient-appointment-editor"><div className="form-section-heading"><h2>Add next appointment</h2><p>It will also appear in the clinic calendar.</p></div><div className="patient-fields appointment-inline-fields"><label>Appointment type<input required minLength="2" maxLength="160" value={appointmentForm.title} onChange={event=>setAppointmentForm(current=>({...current,title:event.target.value}))}/></label><label>Date and time<input required type="datetime-local" min={clinicDateTimeInput(new Date(),clinicTimezone)} value={appointmentForm.starts_at} onChange={event=>setAppointmentForm(current=>({...current,starts_at:event.target.value}))}/></label><label>WhatsApp reminder<select value={appointmentForm.reminder_minutes_before} onChange={event=>setAppointmentForm(current=>({...current,reminder_minutes_before:event.target.value}))}><option value="">No reminder</option><option value="1440">24 hours before</option><option value="60">1 hour before</option><option value="30">30 minutes before</option></select></label></div>{!selected.consent&&appointmentForm.reminder_minutes_before!==''&&<p className="field-error">Record the patient's WhatsApp reminder consent before requesting a reminder.</p>}{appointmentError&&<p className="auth-error" role="alert">{appointmentError}</p>}{appointmentNotice&&<p className="auth-success" role="status">{appointmentNotice}</p>}<button type="button" className="primary-button" disabled={appointmentSaving||(!selected.consent&&appointmentForm.reminder_minutes_before!=='')} onClick={schedulePatientAppointment}>{appointmentSaving?'Saving appointment...':'Save appointment'}</button></section></>}
       <label className="consent-row"><input type="checkbox" checked={form.consent} onChange={event=>update('consent',event.target.checked)}/><span><b>Patient has consented to WhatsApp reminders</b><small>Keep unchecked until the clinic has recorded the patient's consent. Unchecking means reminders must not be sent.</small></span></label>
       <div className="form-section-heading medication-heading"><h2>Doctor-entered medication reminders</h2><p>Fill these fields only from an existing prescription confirmed by a qualified clinician. The app does not recommend or change a dose.</p></div>
       {form.medications.map((medication,index)=><section className="medication-card" key={medication.id||index}>
@@ -371,11 +408,123 @@ function PatientsPage({patients,onSave,loading,error}) {
     {error&&<p className="auth-error" role="alert">{error}</p>}
     <div className="metric-grid section-metrics"><section className="metric-card"><div className="metric-label">Patients in this clinic</div><div className="metric-number">{loading||error?'—':patients.length}</div></section><section className="metric-card"><div className="metric-label">Consent recorded</div><div className="metric-number">{loading||error?'—':patients.filter(patient=>patient.consent).length}</div></section><section className="metric-card"><div className="metric-label">Active patients</div><div className="metric-number">{loading||error?'—':patients.filter(patient=>patient.active).length}</div></section></div>
     <section className="panel section-table-panel"><div className="panel-heading"><div><h2>Patient directory</h2><p>Select a patient row to edit their details</p></div><label className="section-search"><Search size={15}/><input value={query} onChange={event=>setQuery(event.target.value)} placeholder="Search patients..." aria-label="Search patients"/></label></div>
-      <div className="table-scroll"><table className="workspace-table patient-table"><thead><tr><th>Patient</th><th>WhatsApp number</th><th>Language</th><th>Consent</th><th>Medication entries</th></tr></thead><tbody>{filtered.map(patient=><tr className="clickable-patient-row" tabIndex={0} key={patient.id} onClick={()=>navigate(`/patients/${patient.id}`)} onKeyDown={event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();navigate(`/patients/${patient.id}`);}}}><td>{patient.name}</td><td>{patient.phone}</td><td>{patient.language}</td><td><span className={`table-status ${patient.consent?'active':'needs-setup'}`}>{patient.consent?'Consent recorded':'No consent'}</span></td><td>{patient.medications.length}</td></tr>)}{loading&&<tr><td className="empty-row" colSpan="5">Loading patients...</td></tr>}{!loading&&!error&&filtered.length===0&&<tr><td className="empty-row" colSpan="5">No matching patients. Add a patient to get started.</td></tr>}</tbody></table></div>
+      <div className="table-scroll"><table className="workspace-table patient-table"><thead><tr><th>Patient</th><th>WhatsApp number</th><th>Language</th><th>Consent</th><th>Medication entries</th><th>Next appointment</th></tr></thead><tbody>{filtered.map(patient=><tr className="clickable-patient-row" tabIndex={0} key={patient.id} onClick={()=>navigate(`/patients/${patient.id}`)} onKeyDown={event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();navigate(`/patients/${patient.id}`);}}}><td>{patient.name}</td><td>{patient.phone}</td><td>{patient.language}</td><td><span className={`table-status ${patient.consent?'active':'needs-setup'}`}>{patient.consent?'Consent recorded':'No consent'}</span></td><td>{patient.medications.length}</td><td>{patient.nextAppointment?<>{clinicDateTimeLabel(patient.nextAppointment.starts_at,clinicTimezone)} <button type="button" className="text-link" onClick={event=>{event.stopPropagation();navigate(`/appointments?${new URLSearchParams({patient:patient.id,return:'/patients'})}`);}}>View</button></>:<button type="button" className="text-link" onClick={event=>{event.stopPropagation();navigate(`/appointments?${new URLSearchParams({patient:patient.id,return:'/patients'})}`);}}>Schedule</button>}</td></tr>)}{loading&&<tr><td className="empty-row" colSpan="6">Loading patients...</td></tr>}{!loading&&!error&&filtered.length===0&&<tr><td className="empty-row" colSpan="6">No matching patients. Add a patient to get started.</td></tr>}</tbody></table></div>
     </section>
     <footer className="page-footer"><span>Copyright 2026 Careloop Health</span><span>Clinic records</span><button>Privacy & security</button></footer>
   </div>;
 }
+
+function AppointmentsPage({auth,patients,clinicTimezone='Asia/Kolkata'}) {
+  const location=useLocation();
+  const navigate=useNavigate();
+  const params=new URLSearchParams(location.search);
+  const preferredPatient=params.get('patient')||'';
+  const requestedReturn=params.get('return')||'';
+  const returnTo=requestedReturn.startsWith('/')&&!requestedReturn.startsWith('//')?requestedReturn:'/patients';
+  const todayKey=clinicDateKey(new Date(),clinicTimezone);
+  const [month,setMonth]=useState((params.get('date')||todayKey).slice(0,7));
+  const [selectedDate,setSelectedDate]=useState(params.get('date')||todayKey);
+  const [rows,setRows]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [saving,setSaving]=useState(false);
+  const [error,setError]=useState('');
+  const [notice,setNotice]=useState('');
+  const [showForm,setShowForm]=useState(Boolean(preferredPatient));
+  const [form,setForm]=useState({patient_id:preferredPatient,title:'Follow-up consultation',starts_at:'',notes:'',reminder_minutes_before:''});
+  const request=async(url,options={})=>{
+    const response=await fetch(`${API_BASE}${url}`,{...options,headers:{Authorization:`Bearer ${auth.access_token}`,...(options.body?{'Content-Type':'application/json'}:{}),...options.headers}});
+    const result=response.status===204?null:await response.json();
+    if(!response.ok)throw new Error(result?.detail||'Could not load appointments.');
+    return result;
+  };
+  const load=async()=>{
+    setLoading(true);setError('');
+    try {
+      const query=new URLSearchParams({month});
+      setRows(await request(`/api/clinic/appointments?${query}`));
+    } catch(err) {setError(err.message);}
+    finally {setLoading(false);}
+  };
+  useEffect(()=>{load();},[auth.access_token,month]);
+  useEffect(()=>{
+    if(preferredPatient){setForm(current=>({...current,patient_id:preferredPatient}));setShowForm(true);}
+  },[preferredPatient]);
+  const shiftMonth=(offset)=>{
+    const [year,monthNumber]=month.split('-').map(Number);
+    const value=new Date(year,monthNumber-1+offset,1);
+    const nextMonth=`${value.getFullYear()}-${String(value.getMonth()+1).padStart(2,'0')}`;
+    setMonth(nextMonth);
+    setSelectedDate(`${nextMonth}-01`);
+  };
+  const firstOfMonth=new Date(`${month}-01T12:00:00`);
+  const daysInMonth=new Date(firstOfMonth.getFullYear(),firstOfMonth.getMonth()+1,0).getDate();
+  const firstWeekday=new Date(firstOfMonth.getFullYear(),firstOfMonth.getMonth(),1).getDay();
+  const calendarCells=[...Array(firstWeekday).fill(null),...Array.from({length:daysInMonth},(_,index)=>index+1)];
+  const countsByDate=rows.reduce((counts,row)=>{
+    const key=clinicDateKey(row.starts_at,clinicTimezone);
+    counts[key]=(counts[key]||0)+1;
+    return counts;
+  },{});
+  const dayRows=rows.filter(row=>clinicDateKey(row.starts_at,clinicTimezone)===selectedDate);
+  const selectedPatient=patients.find(patient=>patient.id===form.patient_id);
+  const openAddForm=()=>{
+    const initialTime=selectedDate===todayKey?clinicDateTimeInput(new Date(),clinicTimezone):`${selectedDate}T09:00`;
+    setForm(current=>({...current,patient_id:preferredPatient||current.patient_id,title:current.title||'Follow-up consultation',starts_at:initialTime}));
+    setShowForm(true);setError('');setNotice('');
+  };
+  const submit=async event=>{
+    event.preventDefault();setSaving(true);setError('');setNotice('');
+    try {
+      const payload={...form,reminder_minutes_before:form.reminder_minutes_before===''?null:Number(form.reminder_minutes_before)};
+      const created=await request('/api/clinic/appointments',{method:'POST',body:JSON.stringify(payload)});
+      setNotice(`Appointment scheduled for ${created.patient_name}.`);
+      setForm(current=>({...current,title:'Follow-up consultation',starts_at:'',notes:'',reminder_minutes_before:''}));
+      await load();
+    } catch(err) {setError(err.message);}
+    finally {setSaving(false);}
+  };
+  const updateStatus=async(appointment,status)=>{
+    setError('');
+    try {
+      const result=await request(`/api/clinic/appointments/${appointment.id}?status=${status}`,{method:'PATCH'});
+      setRows(current=>current.map(row=>row.id===result.id?{...row,...result}:row));
+      setNotice('Appointment status updated.');
+    } catch(err) {setError(err.message);}
+  };
+  const scheduled=rows.filter(row=>row.status==='scheduled').length;
+  const confirmed=rows.filter(row=>row.status==='confirmed').length;
+  return <div className="workspace-page">
+    <div className="welcome-row"><div><div className="eyebrow"><span className="live-dot"/> CLINIC WORKSPACE</div><h1>Appointments</h1><p>Choose a calendar day to see that day's patients and appointments.</p></div><button className="primary-button" onClick={openAddForm}>+ Add appointment</button></div>
+    {requestedReturn&&<button className="back-link" onClick={()=>navigate(returnTo)}>Back to patient</button>}
+    <div className="demo-notice"><CalendarDays size={16}/><span>WhatsApp appointment reminders require patient consent, a connected clinic WhatsApp account, and an approved Utility template named appointment_reminder with body placeholders for patient name, appointment type, and local date/time.</span></div>
+    {error&&<p className="auth-error" role="alert">{error}</p>}{notice&&<p className="auth-success" role="status">{notice}</p>}
+    <section className="panel appointment-calendar-panel">
+      <div className="appointment-calendar-heading"><button className="secondary-button" onClick={()=>shiftMonth(-1)}>Previous</button><h2>{firstOfMonth.toLocaleDateString('en-IN',{month:'long',year:'numeric'})}</h2><div className="appointment-calendar-actions"><input type="month" value={month} onChange={event=>{if(event.target.value){setMonth(event.target.value);setSelectedDate(`${event.target.value}-01`);}}} aria-label="Select appointment month"/><button className="secondary-button" onClick={()=>shiftMonth(1)}>Next</button></div></div>
+      <div className="appointment-calendar-grid">{['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(day=><div className="appointment-weekday" key={day}>{day}</div>)}{calendarCells.map((day,index)=>{
+        if(!day)return <div className="appointment-calendar-blank" key={`blank-${index}`}/>;
+        const key=`${month}-${String(day).padStart(2,'0')}`;
+        const count=countsByDate[key]||0;
+        return <button type="button" key={key} className={`appointment-calendar-day ${selectedDate===key?'selected-day':''} ${key===todayKey?'today-day':''} ${count?'has-appointments':''}`} aria-pressed={selectedDate===key} onClick={()=>setSelectedDate(key)}><span>{day}</span>{count>0&&<small>{count} appointment{count===1?'':'s'}</small>}</button>;
+      })}</div>
+      <div className="appointment-calendar-legend"><span><i className="calendar-today-dot"/> Today</span><span>Appointment counts update from saved clinic records.</span></div>
+    </section>
+    {showForm&&<section className="panel patient-form-panel"><div className="form-section-heading"><h2>Add an appointment</h2><p>Scheduled appointments also appear on the patient's record.</p></div><form className="admin-create-form" onSubmit={submit}>
+      <label>Patient<select required value={form.patient_id} onChange={event=>setForm(current=>({...current,patient_id:event.target.value}))}><option value="">Select a patient</option>{patients.map(patient=><option key={patient.id} value={patient.id}>{patient.name}</option>)}</select></label>
+      <label>Appointment type<input required minLength="2" maxLength="160" value={form.title} onChange={event=>setForm(current=>({...current,title:event.target.value}))} placeholder="Consultation or follow-up"/></label>
+      <label>Date and time<input required type="datetime-local" min={clinicDateTimeInput(new Date(),clinicTimezone)} value={form.starts_at} onChange={event=>setForm(current=>({...current,starts_at:event.target.value}))}/><small>Entered in the clinic's local time zone.</small></label>
+      <label>WhatsApp reminder<select value={form.reminder_minutes_before} onChange={event=>setForm(current=>({...current,reminder_minutes_before:event.target.value}))}><option value="">No reminder</option><option value="1440">24 hours before</option><option value="60">1 hour before</option><option value="30">30 minutes before</option></select></label>
+      {form.reminder_minutes_before!==''&&!selectedPatient?.consent&&<p className="auth-error">This patient has no recorded WhatsApp consent. Record consent before requesting a reminder.</p>}
+      <label>Notes<textarea maxLength="2000" value={form.notes} onChange={event=>setForm(current=>({...current,notes:event.target.value}))} rows="3" placeholder="Optional appointment notes"/></label>
+      <button className="primary-button" disabled={saving||patients.length===0||(form.reminder_minutes_before!==''&&!selectedPatient?.consent)}>{saving?'Saving appointment...':'Save appointment'}</button>
+    </form>{patients.length===0&&<p className="empty-row">Add an active patient before scheduling.</p>}</section>}
+    <section className="panel section-table-panel appointment-day-panel"><div className="panel-heading"><div><h2>{new Date(`${selectedDate}T12:00:00`).toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long',year:'numeric'})}</h2><p>{dayRows.length} appointment{dayRows.length===1?'':'s'} scheduled for this date</p></div><button className="secondary-button" onClick={openAddForm}>+ Add on this day</button></div>
+      <div className="table-scroll"><table className="workspace-table"><thead><tr><th>Time</th><th>Patient</th><th>Appointment</th><th>Notes</th><th>Appointment status</th><th>Reminder</th></tr></thead><tbody>{dayRows.map(row=><tr key={row.id}><td>{clinicDateTimeLabel(row.starts_at,clinicTimezone)}</td><td>{row.patient_name}</td><td>{row.title}</td><td>{row.notes||'\u2014'}</td><td><select aria-label={`Status for ${row.patient_name}'s appointment`} value={row.status} onChange={event=>updateStatus(row,event.target.value)}><option value="scheduled">Scheduled</option><option value="confirmed">Confirmed</option><option value="completed">Completed</option><option value="cancelled">Cancelled</option></select></td><td>{row.reminder_status==='not_requested'?'None':row.reminder_status==='pending'?'Scheduled':row.reminder_status==='sent'?'Sent':row.reminder_status==='failed'?`Failed${row.reminder_error?`: ${row.reminder_error}`:''}`:'Skipped'}</td></tr>)}{loading&&<tr><td colSpan="6" className="empty-row">Loading appointments...</td></tr>}{!loading&&!error&&dayRows.length===0&&<tr><td colSpan="6" className="empty-row">No appointments on this date. Choose \u201cAdd on this day\u201d to schedule one.</td></tr>}</tbody></table></div>
+    </section>
+    <div className="metric-grid section-metrics appointment-metrics"><section className="metric-card"><div className="metric-label">Appointments this month</div><div className="metric-number">{loading?'?':rows.length}</div></section><section className="metric-card"><div className="metric-label">Scheduled</div><div className="metric-number">{loading?'?':scheduled}</div></section><section className="metric-card"><div className="metric-label">Confirmed</div><div className="metric-number">{loading?'?':confirmed}</div></section></div>
+    <footer className="page-footer"><span>Clinic appointment calendar</span><span>Month and day views</span></footer>
+  </div>;
+}
+
 function MedicineAutocomplete({value,onChange}) {
   const [items,setItems] = useState([]);
   const [open,setOpen] = useState(false);
@@ -463,7 +612,7 @@ function WhatsAppSettingsPage({auth}) {
   };
   return <div className="workspace-page">
     <div className="welcome-row"><div><div className="eyebrow"><span className="live-dot"/> CLINIC WORKSPACE</div><h1>WhatsApp settings</h1><p>Connect this clinic's WhatsApp Business phone number to the Cloud API.</p></div></div>
-    <div className="demo-notice"><ShieldCheck size={16}/><span>Tokens are encrypted before they are saved. Use a system-user token for a durable connection; never paste tokens into chat or frontend environment files. For reminders, approve a Utility template named medication_reminder with three body placeholders and Quick Reply buttons titled Taken and Not taken.</span></div>
+    <div className="demo-notice"><ShieldCheck size={16}/><span>Tokens are encrypted before they are saved. Use a system-user token for a durable connection; never paste tokens into chat or frontend environment files. For medication reminders, approve the medication_reminder template with its Taken and Not taken replies. For appointment reminders, also approve an appointment_reminder Utility template with body placeholders for patient name, appointment type, and date/time.</span></div>
     {error&&<p className="auth-error" role="alert">{error}</p>}{notice&&<p className="auth-success" role="status">{notice}</p>}
     <section className="panel patient-form-panel">
       <div className="form-section-heading"><h2>{connection?.connected?'WhatsApp account connected':'Connect WhatsApp Cloud API'}</h2><p>Find the WhatsApp Business Account ID and Phone Number ID in Meta's WhatsApp Manager or developer dashboard. The token needs the whatsapp_business_messaging permission.</p></div>

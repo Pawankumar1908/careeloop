@@ -28,6 +28,8 @@ services:
         value: v23.0
       - key: WHATSAPP_REMINDER_TEMPLATE_NAME
         value: medication_reminder
+      - key: WHATSAPP_APPOINTMENT_TEMPLATE_NAME
+        value: appointment_reminder
       - key: WHATSAPP_TEMPLATE_LANGUAGE
         value: en_US
       - key: WHATSAPP_TOKEN_ENCRYPTION_KEY
