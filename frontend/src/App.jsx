@@ -92,8 +92,8 @@ function App() {
   };
   const savePatient = async (patient) => {
     const payload = {
-      name: patient.name, phone_e164: patient.phone, preferred_language: patient.language,
-      consent: patient.consent,
+      name: patient.name, age: patient.age === '' || patient.age == null ? null : Number(patient.age), gender: patient.gender || null,
+      phone_e164: patient.phone, preferred_language: patient.language, consent: patient.consent,
       medications: patient.medications.map(item => ({
         id: item.id,
         medicine_name: item.name, frequency: item.frequency, food_timing: item.foodTiming,
@@ -108,7 +108,7 @@ function App() {
     const result = await response.json();
     if (!response.ok) throw new Error(result.detail || 'Could not save patient.');
     const saved = {
-      id: result.id, name: result.name, phone: result.phone_e164,
+      id: result.id, name: result.name, age: result.age, gender: result.gender, phone: result.phone_e164,
       language: result.preferred_language, consent: result.consent, active: result.is_active,
       nextAppointment: patient.nextAppointment,
       medications: result.medications.map(item => ({
@@ -200,7 +200,7 @@ function App() {
     fetch(`${API_BASE}/api/patients`, { headers: { Authorization: `Bearer ${auth.access_token}` }, signal: controller.signal })
       .then(response => { if (!response.ok) throw new Error('Unable to load clinic patients'); return response.json(); })
       .then(rows => setPatients(rows.map(patient => ({
-        id: patient.id, name: patient.name, phone: patient.phone_e164,
+        id: patient.id, name: patient.name, age: patient.age, gender: patient.gender, phone: patient.phone_e164,
         language: patient.preferred_language, consent: patient.consent, active: patient.is_active,
         nextAppointment: patient.next_appointment,
         medications: patient.medications.map(item => ({
@@ -244,7 +244,7 @@ function App() {
     </aside>
     <main className="main-content"><header className="topbar"><button className="icon-button menu-toggle" onClick={() => setOpen(true)} aria-label="Open navigation"><Menu size={21}/></button><div className="crumb">Workspace <span>/</span> <b>{active}</b></div><div className="top-actions"><div className="searchbox"><Search size={16}/><input placeholder="Search sections..." aria-label="Search sections" onKeyDown={event => { if (event.key === "Enter") { const term=event.currentTarget.value.trim().toLowerCase(); const match=nav.flatMap(group=>group.links.map(([label])=>label)).find(label=>label.toLowerCase().includes(term)); if(match){navigate(pathFor(match));event.currentTarget.value="";} } }}/><kbd>Enter</kbd></div><div className="text-size-controls" aria-label="Text size controls"><button type="button" onClick={() => adjustTextSize(-0.1)} disabled={textScale <= 0.8} aria-label="Decrease text size" title="Decrease text size">A-</button><button type="button" onClick={() => adjustTextSize(0.1)} disabled={textScale >= 1.3} aria-label="Increase text size" title="Increase text size">A+</button></div><button className="icon-button notify" aria-label="Notifications" title="Open messages" onClick={() => navigate(pathFor("WhatsApp messages"))}><Bell size={19}/><i/></button><div className="profile-menu"><button className="top-user top-user-button" onClick={() => setProfileOpen(current => !current)} aria-haspopup="menu" aria-expanded={profileOpen} aria-label="Open account menu" title="Account menu"><div className="avatar avatar-user">{auth.user.name.slice(0,2).toUpperCase()}</div><ChevronDown size={15}/></button>{profileOpen && <div className="profile-dropdown" role="menu"><div className="profile-details"><b>{auth.user.name}</b><span>{auth.user.email || auth.user.phone_e164}</span></div><button role="menuitem" onClick={signOut}>Sign out</button></div>}</div></div></header>
       {auth.user.admin_view && <div className="demo-notice admin-view-notice"><ShieldCheck size={16}/><span>Platform admin access to {clinic?.name || 'this clinic'}.</span><button className="secondary-button" onClick={returnToPlatform}>Return to platform admin</button></div>}
-      <div className="page-wrap">{active === 'Patients' && <PatientsPage auth={auth} patients={patients} loading={patientsLoading} error={patientsError} onSave={savePatient} onAppointmentCreated={updateNextAppointment} clinicTimezone={clinic?.timezone||'Asia/Kolkata'}/>} {active === 'Appointments' && <AppointmentsPage auth={auth} patients={patients} clinicTimezone={clinic?.timezone||'Asia/Kolkata'}/> } {(active === 'Medication schedules' || active === 'WhatsApp messages') && <MedicationActivityPage active={active} auth={auth}/>} {active === 'WhatsApp settings' && <WhatsAppSettingsPage auth={auth}/>} {active === 'Staff & permissions' && <StaffPage auth={auth}/>} {active !== 'Overview' && active !== 'Patients' && active !== 'Appointments' && active !== 'Medication schedules' && active !== 'WhatsApp messages' && active !== 'WhatsApp settings' && active !== 'Staff & permissions' && <WorkspacePage key={active} active={active}/>} {active === 'Overview' && <><div className="welcome-row"><div><div className="eyebrow"><span className="live-dot"/> {dateLabel}</div><h1>{greeting}, {auth.user.admin_view ? (clinic?.name || auth.user.name) : auth.user.name}</h1><p>Here's what's happening at your clinic today.</p></div><div className="date-button"><CalendarDays size={16}/> {today.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</div></div>
+      <div className="page-wrap">{active === 'Patients' && <PatientsPage auth={auth} patients={patients} loading={patientsLoading} error={patientsError} onSave={savePatient} onAppointmentCreated={updateNextAppointment} clinicTimezone={clinic?.timezone||'Asia/Kolkata'}/>} {active === 'Appointments' && <AppointmentsPage auth={auth} patients={patients} onSavePatient={savePatient} clinicTimezone={clinic?.timezone||'Asia/Kolkata'}/> } {(active === 'Medication schedules' || active === 'WhatsApp messages') && <MedicationActivityPage active={active} auth={auth}/>} {active === 'WhatsApp settings' && <WhatsAppSettingsPage auth={auth}/>} {active === 'Staff & permissions' && <StaffPage auth={auth}/>} {active !== 'Overview' && active !== 'Patients' && active !== 'Appointments' && active !== 'Medication schedules' && active !== 'WhatsApp messages' && active !== 'WhatsApp settings' && active !== 'Staff & permissions' && <WorkspacePage key={active} active={active}/>} {active === 'Overview' && <><div className="welcome-row"><div><div className="eyebrow"><span className="live-dot"/> {dateLabel}</div><h1>{greeting}, {auth.user.admin_view ? (clinic?.name || auth.user.name) : auth.user.name}</h1><p>Here's what's happening at your clinic today.</p></div><div className="date-button"><CalendarDays size={16}/> {today.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</div></div>
         {dashboardError&&<p className="auth-error" role="alert">{dashboardError}</p>}
         <div className="metric-grid"><Metric icon={Users} label="Total patients" number={dashboardLoading?'—':dashboard?.patient_count ?? '—'} note="registered in this clinic" tone="teal"/><Metric icon={Pill} label="Active schedules" number={dashboardLoading?'—':dashboard?.active_schedule_count ?? '—'} note="currently active" tone="purple"/><Metric icon={MessageCircle} label="Messages delivered today" number={dashboardLoading?'—':dashboard?.delivered_today ?? '—'} note={dashboardLoading?'Loading activity':`${dashboard?.reminders_today ?? '—'} reminders scheduled today`} tone="blue"/><Metric icon={CircleAlert} label="Needs attention" number={dashboardLoading?'—':dashboard?.needs_attention ?? '—'} note="patient replies marked not taken" tone="amber" alert={dashboard?.needs_attention > 0}/></div>
         <div className="content-grid"><section className="panel reminders-panel"><div className="panel-heading"><div><h2>Today's reminders</h2><p>Live medication reminder activity for this clinic</p></div><button className="text-link" onClick={() => navigate(pathFor("Medication schedules"))}>View all <ArrowUpRight size={14}/></button></div><div className="reminder-summary"><span><i className="legend-dot teal-dot"/> {dashboardLoading?'—':dashboard?.reminders_today ?? '—'} scheduled</span><span><i className="legend-dot gray-dot"/> {dashboardLoading?'—':dashboard?.delivered_today ?? '—'} delivered</span></div><div className="reminder-list">{(dashboard?.reminders || []).map(reminder=><div className="reminder-row" key={reminder.id}><div className="avatar avatar-mint">{reminder.patient_name.slice(0,2).toUpperCase()}</div><div className="reminder-person"><b>{reminder.patient_name}</b><span>Medication reminder - {reminder.medicine_name}</span></div><span className="reminder-time">{new Date(reminder.scheduled_for).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})}</span><span className={`status status-${reminder.status.replaceAll('_','-')}`}><i/>{reminder.status.replaceAll('_',' ')}</span></div>)}{dashboardLoading && <div className="empty-row">Loading reminders...</div>}{dashboardError && <div className="empty-row">Reminder data is unavailable.</div>}{dashboard && dashboard.reminders.length===0 && <div className="empty-row">No reminders scheduled today.</div>}</div><button className="panel-footer" onClick={() => navigate(pathFor("Medication schedules"))}>See reminder activity <ArrowUpRight size={14}/></button></section>
@@ -349,7 +349,7 @@ function PatientsPage({auth,patients,onSave,onAppointmentCreated,clinicTimezone=
   const isNew = location.pathname === '/patients/new';
   const patientId = !isNew && location.pathname.startsWith('/patients/') ? location.pathname.slice('/patients/'.length) : null;
   const selected = patients.find(patient=>patient.id===patientId);
-  const blank = {name:'',phone:'',language:'English',consent:false,active:true,medications:[]};
+  const blank = {name:'',age:'',gender:'',phone:'',language:'English',consent:false,active:true,medications:[]};
   const [form,setForm] = useState(blank);
   const [phoneError,setPhoneError] = useState('');
   const [formError,setFormError] = useState('');
@@ -389,7 +389,7 @@ function PatientsPage({auth,patients,onSave,onAppointmentCreated,clinicTimezone=
     <div className="demo-notice"><CircleAlert size={16}/><span>Patient and medication schedules save to this clinic. WhatsApp reminders send only after recorded consent, a connected WhatsApp account, and an approved reminder template are configured.</span></div>
     <form className="panel patient-form-panel" onSubmit={submit}>
       <div className="form-section-heading"><h2>Patient details</h2><p>Collect only information needed for clinic communication.</p></div>
-      <div className="patient-fields"><label>Patient name<input required maxLength={160} value={form.name} onChange={event=>update('name',event.target.value)} placeholder="Full name"/></label><label>WhatsApp number<input required inputMode="tel" maxLength={16} value={form.phone} onChange={event=>{update('phone',event.target.value);setPhoneError('');}} onBlur={event=>update('phone',event.target.value.trim())} aria-invalid={Boolean(phoneError)} aria-describedby="phone-validation" placeholder="+919876543210"/><small id="phone-validation" className={phoneError?'field-error':''}>{phoneError||'Enter the full number with + and country code.'}</small></label><label>Preferred language<select value={form.language} onChange={event=>update('language',event.target.value)}><option>English</option><option>Hindi</option><option>Marathi</option><option>Tamil</option><option>Other</option></select></label></div>
+      <div className="patient-fields"><label>Patient name<input required maxLength={160} value={form.name} onChange={event=>update('name',event.target.value)} placeholder="Full name"/></label><label>Age<input type="number" min="0" max="120" value={form.age??''} onChange={event=>update('age',event.target.value)} placeholder="Age in years"/></label><label>Gender<select value={form.gender||''} onChange={event=>update('gender',event.target.value)}><option value="">Select gender</option><option value="Female">Female</option><option value="Male">Male</option><option value="Other">Other</option><option value="Prefer not to say">Prefer not to say</option></select></label><label>WhatsApp number<input required inputMode="tel" maxLength={16} value={form.phone} onChange={event=>{update('phone',event.target.value);setPhoneError('');}} onBlur={event=>update('phone',event.target.value.trim())} aria-invalid={Boolean(phoneError)} aria-describedby="phone-validation" placeholder="+919876543210"/><small id="phone-validation" className={phoneError?'field-error':''}>{phoneError||'Enter the full number with + and country code.'}</small></label><label>Preferred language<select value={form.language} onChange={event=>update('language',event.target.value)}><option>English</option><option>Hindi</option><option>Marathi</option><option>Tamil</option><option>Other</option></select></label></div>
       {editing&&<><section className="patient-next-appointment"><div><b>Next appointment</b><span>{selected.nextAppointment?`${selected.nextAppointment.title} · ${clinicDateTimeLabel(selected.nextAppointment.starts_at,clinicTimezone)}`:'No upcoming appointment scheduled'}</span><small>{selected.nextAppointment?.reminder_status==='sent'?'WhatsApp reminder sent':selected.nextAppointment?.reminder_status==='pending'?'Appointment reminder is scheduled':selected.nextAppointment?.reminder_status==='failed'?'Appointment reminder failed to send':''}</small></div><button type="button" className="secondary-button" onClick={()=>navigate(`/appointments?${new URLSearchParams({patient:selected.id,return:location.pathname})}`)}>View calendar</button></section><section className="patient-appointment-editor"><div className="form-section-heading"><h2>Add next appointment</h2><p>It will also appear in the clinic calendar.</p></div><div className="patient-fields appointment-inline-fields"><label>Appointment type<input required minLength="2" maxLength="160" value={appointmentForm.title} onChange={event=>setAppointmentForm(current=>({...current,title:event.target.value}))}/></label><label>Date and time<input required type="datetime-local" min={clinicDateTimeInput(new Date(),clinicTimezone)} value={appointmentForm.starts_at} onChange={event=>setAppointmentForm(current=>({...current,starts_at:event.target.value}))}/></label><label>WhatsApp confirmation alert<select value={appointmentForm.reminder_minutes_before} onChange={event=>setAppointmentForm(current=>({...current,reminder_minutes_before:event.target.value}))}><option value="">No reminder</option><option value="1440">24 hours before</option><option value="60">1 hour before</option><option value="30">30 minutes before</option></select></label></div>{!selected.consent&&appointmentForm.reminder_minutes_before!==''&&<p className="field-error">Record the patient's WhatsApp reminder consent before requesting a reminder.</p>}{appointmentError&&<p className="auth-error" role="alert">{appointmentError}</p>}{appointmentNotice&&<p className="auth-success" role="status">{appointmentNotice}</p>}<button type="button" className="primary-button" disabled={appointmentSaving||(!selected.consent&&appointmentForm.reminder_minutes_before!=='')} onClick={schedulePatientAppointment}>{appointmentSaving?'Saving appointment...':'Save appointment'}</button></section></>}
       <label className="consent-row"><input type="checkbox" checked={form.consent} onChange={event=>update('consent',event.target.checked)}/><span><b>Patient has consented to WhatsApp reminders</b><small>Keep unchecked until the clinic has recorded the patient's consent. Unchecking means reminders must not be sent.</small></span></label>
       <div className="form-section-heading medication-heading"><h2>Doctor-entered medication reminders</h2><p>Fill these fields only from an existing prescription confirmed by a qualified clinician. The app does not recommend or change a dose.</p></div>
@@ -408,19 +408,22 @@ function PatientsPage({auth,patients,onSave,onAppointmentCreated,clinicTimezone=
     {error&&<p className="auth-error" role="alert">{error}</p>}
     <div className="metric-grid section-metrics"><section className="metric-card"><div className="metric-label">Patients in this clinic</div><div className="metric-number">{loading||error?'—':patients.length}</div></section><section className="metric-card"><div className="metric-label">Consent recorded</div><div className="metric-number">{loading||error?'—':patients.filter(patient=>patient.consent).length}</div></section><section className="metric-card"><div className="metric-label">Active patients</div><div className="metric-number">{loading||error?'—':patients.filter(patient=>patient.active).length}</div></section></div>
     <section className="panel section-table-panel"><div className="panel-heading"><div><h2>Patient directory</h2><p>Select a patient row to edit their details</p></div><label className="section-search"><Search size={15}/><input value={query} onChange={event=>setQuery(event.target.value)} placeholder="Search patients..." aria-label="Search patients"/></label></div>
-      <div className="table-scroll"><table className="workspace-table patient-table"><thead><tr><th>Patient</th><th>WhatsApp number</th><th>Language</th><th>Consent</th><th>Medication entries</th><th>Next appointment</th></tr></thead><tbody>{filtered.map(patient=><tr className="clickable-patient-row" tabIndex={0} key={patient.id} onClick={()=>navigate(`/patients/${patient.id}`)} onKeyDown={event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();navigate(`/patients/${patient.id}`);}}}><td>{patient.name}</td><td>{patient.phone}</td><td>{patient.language}</td><td><span className={`table-status ${patient.consent?'active':'needs-setup'}`}>{patient.consent?'Consent recorded':'No consent'}</span></td><td>{patient.medications.length}</td><td>{patient.nextAppointment?<>{clinicDateTimeLabel(patient.nextAppointment.starts_at,clinicTimezone)} <button type="button" className="text-link" onClick={event=>{event.stopPropagation();navigate(`/appointments?${new URLSearchParams({patient:patient.id,return:'/patients'})}`);}}>View</button></>:<button type="button" className="text-link" onClick={event=>{event.stopPropagation();navigate(`/appointments?${new URLSearchParams({patient:patient.id,return:'/patients'})}`);}}>Schedule</button>}</td></tr>)}{loading&&<tr><td className="empty-row" colSpan="6">Loading patients...</td></tr>}{!loading&&!error&&filtered.length===0&&<tr><td className="empty-row" colSpan="6">No matching patients. Add a patient to get started.</td></tr>}</tbody></table></div>
+      <div className="table-scroll"><table className="workspace-table patient-table"><thead><tr><th>Patient</th><th>Age</th><th>Gender</th><th>WhatsApp number</th><th>Language</th><th>Consent</th><th>Medication entries</th><th>Next appointment</th></tr></thead><tbody>{filtered.map(patient=><tr className="clickable-patient-row" tabIndex={0} key={patient.id} onClick={()=>navigate(`/patients/${patient.id}`)} onKeyDown={event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();navigate(`/patients/${patient.id}`);}}}><td>{patient.name}</td><td>{patient.age??'Not recorded'}</td><td>{patient.gender||'Not recorded'}</td><td>{patient.phone}</td><td>{patient.language}</td><td><span className={`table-status ${patient.consent?'active':'needs-setup'}`}>{patient.consent?'Consent recorded':'No consent'}</span></td><td>{patient.medications.length}</td><td>{patient.nextAppointment?<>{clinicDateTimeLabel(patient.nextAppointment.starts_at,clinicTimezone)} <button type="button" className="text-link" onClick={event=>{event.stopPropagation();navigate(`/appointments/day/${clinicDateKey(patient.nextAppointment.starts_at,clinicTimezone)}`);}}>View</button></>:<button type="button" className="text-link" onClick={event=>{event.stopPropagation();navigate(`/appointments/new?${new URLSearchParams({patient:patient.id,date:clinicDateKey(new Date(),clinicTimezone),return:'/patients'})}`);}}>Schedule</button>}</td></tr>)}{loading&&<tr><td className="empty-row" colSpan="8">Loading patients...</td></tr>}{!loading&&!error&&filtered.length===0&&<tr><td className="empty-row" colSpan="8">No matching patients. Add a patient to get started.</td></tr>}</tbody></table></div>
     </section>
     <footer className="page-footer"><span>Copyright 2026 Careloop Health</span><span>Clinic records</span><button>Privacy & security</button></footer>
   </div>;
 }
 
-function AppointmentsPage({auth,patients,clinicTimezone='Asia/Kolkata'}) {
+function AppointmentsPage({auth,patients,onSavePatient,clinicTimezone='Asia/Kolkata'}) {
   const location=useLocation();
   const navigate=useNavigate();
   const params=new URLSearchParams(location.search);
   const preferredPatient=params.get('patient')||'';
   const requestedReturn=params.get('return')||'';
   const returnTo=requestedReturn.startsWith('/')&&!requestedReturn.startsWith('//')?requestedReturn:'/patients';
+  const isAddPage=location.pathname==='/appointments/new';
+  const selectedDayRoute=location.pathname.match(/^\/appointments\/day\/(\d{4}-\d{2}-\d{2})$/)?.[1]||'';
+  const isDayView=Boolean(selectedDayRoute);
   const todayKey=clinicDateKey(new Date(),clinicTimezone);
   const [month,setMonth]=useState((params.get('date')||todayKey).slice(0,7));
   const [selectedDate,setSelectedDate]=useState(params.get('date')||todayKey);
@@ -429,78 +432,77 @@ function AppointmentsPage({auth,patients,clinicTimezone='Asia/Kolkata'}) {
   const [saving,setSaving]=useState(false);
   const [error,setError]=useState('');
   const [notice,setNotice]=useState('');
-  const [showForm,setShowForm]=useState(Boolean(preferredPatient));
+  const [patientMode,setPatientMode]=useState('existing');
+  const [newPatient,setNewPatient]=useState({name:'',age:'',gender:'',phone:'',consent:false});
   const [form,setForm]=useState({patient_id:preferredPatient,title:'Follow-up consultation',starts_at:'',notes:'',reminder_minutes_before:''});
   const request=async(url,options={})=>{
     const response=await fetch(`${API_BASE}${url}`,{...options,headers:{Authorization:`Bearer ${auth.access_token}`,...(options.body?{'Content-Type':'application/json'}:{}),...options.headers}});
     const result=response.status===204?null:await response.json();
-    if(!response.ok)throw new Error(result?.detail||'Could not load appointments.');
+    if(!response.ok)throw new Error(typeof result?.detail==='string'?result.detail:'Could not complete the appointment request.');
     return result;
   };
   const load=async()=>{
     setLoading(true);setError('');
     try {
-      const query=new URLSearchParams({month});
+      const query=new URLSearchParams({month:selectedDayRoute?selectedDayRoute.slice(0,7):month});
       setRows(await request(`/api/clinic/appointments?${query}`));
     } catch(err) {setError(err.message);}
     finally {setLoading(false);}
   };
-  useEffect(()=>{load();},[auth.access_token,month]);
+  useEffect(()=>{load();},[auth.access_token,selectedDayRoute,month]);
   useEffect(()=>{
-    if(preferredPatient){setForm(current=>({...current,patient_id:preferredPatient}));setShowForm(true);}
-  },[preferredPatient]);
+    if(selectedDayRoute){setSelectedDate(selectedDayRoute);setMonth(selectedDayRoute.slice(0,7));}
+    else if(params.get('date')){setSelectedDate(params.get('date'));setMonth(params.get('date').slice(0,7));}
+    if(preferredPatient){setForm(current=>({...current,patient_id:preferredPatient}));setPatientMode('existing');}
+    if(isAddPage){
+      const appointmentDate=params.get('date')||selectedDate;
+      setSelectedDate(appointmentDate);
+      setForm(current=>({...current,patient_id:preferredPatient||current.patient_id,starts_at:current.starts_at||`${appointmentDate}T09:00`}));
+      if(!preferredPatient&&!patients.length)setPatientMode('new');
+    }
+  },[location.pathname,location.search,patients.length]);
+  const effectiveMonth=selectedDayRoute?selectedDayRoute.slice(0,7):month;
   const shiftMonth=(offset)=>{
-    const [year,monthNumber]=month.split('-').map(Number);
+    const [year,monthNumber]=effectiveMonth.split('-').map(Number);
     const value=new Date(year,monthNumber-1+offset,1);
     const nextMonth=`${value.getFullYear()}-${String(value.getMonth()+1).padStart(2,'0')}`;
-    setMonth(nextMonth);
-    setSelectedDate(`${nextMonth}-01`);
+    setMonth(nextMonth);setSelectedDate(`${nextMonth}-01`);navigate(`/appointments?date=${nextMonth}-01`);
   };
-  const firstOfMonth=new Date(`${month}-01T12:00:00`);
+  const firstOfMonth=new Date(`${effectiveMonth}-01T12:00:00`);
   const daysInMonth=new Date(firstOfMonth.getFullYear(),firstOfMonth.getMonth()+1,0).getDate();
   const firstWeekday=new Date(firstOfMonth.getFullYear(),firstOfMonth.getMonth(),1).getDay();
   const calendarCells=[...Array(firstWeekday).fill(null),...Array.from({length:daysInMonth},(_,index)=>index+1)];
-  const countsByDate=rows.reduce((counts,row)=>{
-    const key=clinicDateKey(row.starts_at,clinicTimezone);
-    counts[key]=(counts[key]||0)+1;
-    return counts;
-  },{});
+  const countsByDate=rows.reduce((counts,row)=>{const key=clinicDateKey(row.starts_at,clinicTimezone);counts[key]=(counts[key]||0)+1;return counts;},{});
   const dayRows=rows.filter(row=>clinicDateKey(row.starts_at,clinicTimezone)===selectedDate);
   const selectedPatient=patients.find(patient=>patient.id===form.patient_id);
-  const openAddForm=()=>{
-    const initialTime=selectedDate===todayKey?clinicDateTimeInput(new Date(),clinicTimezone):`${selectedDate}T09:00`;
-    setForm(current=>({...current,patient_id:preferredPatient||current.patient_id,title:current.title||'Follow-up consultation',starts_at:initialTime}));
-    setShowForm(true);setError('');setNotice('');
-  };
+  const duplicatePatient=patientMode==='new'?patients.find(patient=>patient.name.trim().toLocaleLowerCase()===newPatient.name.trim().toLocaleLowerCase()&&patient.phone===newPatient.phone.trim()):null;
+  const openAddForm=(date=selectedDate)=>navigate(`/appointments/new?${new URLSearchParams({date,...(preferredPatient?{patient:preferredPatient}:{}),...(requestedReturn?{return:requestedReturn}:{})})}`);
   const submit=async event=>{
     event.preventDefault();setSaving(true);setError('');setNotice('');
     try {
-      const payload={...form,reminder_minutes_before:form.reminder_minutes_before===''?null:Number(form.reminder_minutes_before)};
+      let patient=patients.find(item=>item.id===form.patient_id);
+      if(patientMode==='new'){
+        patient=await onSavePatient({...newPatient,age:Number(newPatient.age),gender:newPatient.gender,phone:newPatient.phone.trim(),language:'English',active:true,medications:[]});
+        setPatientMode('existing');setForm(current=>({...current,patient_id:patient.id}));
+      }
+      if(!patient)throw new Error('Choose an existing patient or enter the new patient details.');
+      if(form.reminder_minutes_before!==''&&!patient.consent)throw new Error('WhatsApp confirmation needs the patient\'s recorded consent.');
+      const payload={...form,patient_id:patient.id,reminder_minutes_before:form.reminder_minutes_before===''?null:Number(form.reminder_minutes_before)};
       const created=await request('/api/clinic/appointments',{method:'POST',body:JSON.stringify(payload)});
-      setNotice(`Appointment scheduled for ${created.patient_name}.`);
-      setForm(current=>({...current,title:'Follow-up consultation',starts_at:'',notes:'',reminder_minutes_before:''}));
-      await load();
+      navigate(`/appointments/day/${clinicDateKey(created.starts_at,clinicTimezone)}`);
     } catch(err) {setError(err.message);}
     finally {setSaving(false);}
   };
   const updateStatus=async(appointment,status)=>{
     setError('');
-    try {
-      const result=await request(`/api/clinic/appointments/${appointment.id}`,{method:'PATCH',body:JSON.stringify({status})});
-      setRows(current=>current.map(row=>row.id===result.id?{...row,...result}:row));
-      setNotice('Appointment status updated.');
-    } catch(err) {setError(err.message);}
+    try {const result=await request(`/api/clinic/appointments/${appointment.id}`,{method:'PATCH',body:JSON.stringify({status})});setRows(current=>current.map(row=>row.id===result.id?{...row,...result}:row));}
+    catch(err) {setError(err.message);}
   };
   const updateAttendance=async(appointment,attendance_status)=>{
     setError('');
-    try {
-      const result=await request(`/api/clinic/appointments/${appointment.id}`,{method:'PATCH',body:JSON.stringify({attendance_status})});
-      setRows(current=>current.map(row=>row.id===result.id?{...row,...result}:row));
-      setNotice('Attendance record updated.');
-    } catch(err) {setError(err.message);}
+    try {const result=await request(`/api/clinic/appointments/${appointment.id}`,{method:'PATCH',body:JSON.stringify({attendance_status})});setRows(current=>current.map(row=>row.id===result.id?{...row,...result}:row));}
+    catch(err) {setError(err.message);}
   };
-  const scheduled=rows.filter(row=>row.status==='scheduled').length;
-  const confirmed=rows.filter(row=>row.status==='confirmed').length;
   const isPastSelectedDate=selectedDate<todayKey;
   const registered=dayRows.filter(row=>row.status!=='cancelled');
   const attended=registered.filter(row=>row.attendance_status==='attended').length;
@@ -509,40 +511,46 @@ function AppointmentsPage({auth,patients,clinicTimezone='Asia/Kolkata'}) {
   const notComing=registered.filter(row=>row.confirmation_status==='not_coming').length;
   const awaiting=registered.filter(row=>['pending','sent','delivered','read'].includes(row.confirmation_status)).length;
   const confirmationNotRequested=registered.filter(row=>row.confirmation_status==='not_requested').length;
+  if(isAddPage)return <div className="workspace-page appointment-create-page">
+    <button className="back-link" onClick={()=>navigate(requestedReturn?returnTo:`/appointments/day/${selectedDate}`)}>{requestedReturn?'Back':'Back to selected date'}</button>
+    <div className="welcome-row"><div><div className="eyebrow"><span className="live-dot"/> APPOINTMENT MANAGEMENT</div><h1>Add appointment</h1><p>{new Date(`${selectedDate}T12:00:00`).toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long',year:'numeric'})}</p></div></div>
+    <section className="panel patient-form-panel"><div className="form-section-heading"><h2>Choose patient</h2><p>Use a registered patient or add a new patient. Family members may share a mobile number.</p></div>
+      <div className="appointment-patient-tabs"><button type="button" className={patientMode==='existing'?'selected-tab':''} onClick={()=>{setPatientMode('existing');setError('');}}>Existing patient</button><button type="button" className={patientMode==='new'?'selected-tab':''} onClick={()=>{setPatientMode('new');setForm(current=>({...current,patient_id:''}));setError('');}}>New patient</button></div>
+      <form className="admin-create-form" onSubmit={submit}>
+        {patientMode==='existing'?<label>Patient<select required value={form.patient_id} onChange={event=>setForm(current=>({...current,patient_id:event.target.value}))}><option value="">Select a patient</option>{patients.map(patient=><option key={patient.id} value={patient.id}>{patient.name}{patient.age!==null&&patient.age!==undefined?` · age ${patient.age}`:''} · {patient.phone}</option>)}</select>{patients.length===0&&<small>No patients yet. Choose New patient to register one.</small>}</label>:<><div className="patient-fields appointment-new-patient-fields"><label>Patient name<input required maxLength={160} value={newPatient.name} onChange={event=>setNewPatient(current=>({...current,name:event.target.value}))}/></label><label>Age<input required type="number" min="0" max="120" value={newPatient.age} onChange={event=>setNewPatient(current=>({...current,age:event.target.value}))}/></label><label>Gender<select required value={newPatient.gender} onChange={event=>setNewPatient(current=>({...current,gender:event.target.value}))}><option value="">Select gender</option><option value="Female">Female</option><option value="Male">Male</option><option value="Other">Other</option><option value="Prefer not to say">Prefer not to say</option></select></label><label>Mobile number<input required type="tel" inputMode="tel" maxLength={16} placeholder="+919876543210" value={newPatient.phone} onChange={event=>setNewPatient(current=>({...current,phone:event.target.value}))}/><small>Enter the full international number with + and country code.</small></label><label className="appointment-consent"><input type="checkbox" checked={newPatient.consent} onChange={event=>setNewPatient(current=>({...current,consent:event.target.checked}))}/> Patient has consented to WhatsApp reminders</label></div>{duplicatePatient&&<div className="appointment-duplicate-match" role="status"><span>{duplicatePatient.name} is already registered with this mobile number.</span><button type="button" className="text-link" onClick={()=>{setForm(current=>({...current,patient_id:duplicatePatient.id}));setPatientMode('existing');setError('');}}>Use existing patient</button></div>}</>}
+        <div className="form-section-heading appointment-form-subheading"><h2>Appointment details</h2></div>
+        <label>Appointment type<input required minLength="2" maxLength="160" value={form.title} onChange={event=>setForm(current=>({...current,title:event.target.value}))}/></label>
+        <label>Date and time<input required type="datetime-local" min={clinicDateTimeInput(new Date(),clinicTimezone)} value={form.starts_at} onChange={event=>setForm(current=>({...current,starts_at:event.target.value}))}/></label>
+        <label>WhatsApp confirmation alert<select value={form.reminder_minutes_before} onChange={event=>setForm(current=>({...current,reminder_minutes_before:event.target.value}))}><option value="">No alert</option><option value="1440">24 hours before</option><option value="60">1 hour before</option><option value="30">30 minutes before</option></select><small>An approved appointment template and patient consent are required.</small></label>
+        {patientMode==='existing'&&form.reminder_minutes_before!==''&&!selectedPatient?.consent&&<p className="auth-error">This patient has no recorded WhatsApp consent. Record consent before requesting an alert.</p>}
+        <label>Notes<textarea maxLength={2000} value={form.notes} onChange={event=>setForm(current=>({...current,notes:event.target.value}))} rows="3"/></label>
+        {error&&<p className="auth-error" role="alert">{error}</p>}
+        <button className="primary-button" disabled={saving||(patientMode==='existing'&&patients.length===0)||Boolean(duplicatePatient)||(form.reminder_minutes_before!==''&&(patientMode==='new'?!newPatient.consent:!selectedPatient?.consent))}>{saving?(patientMode==='new'?'Saving patient and appointment...':'Saving appointment...'):patientMode==='new'?'Create patient and appointment':'Save appointment'}</button>
+      </form>
+    </section>
+  </div>;
   return <div className="workspace-page">
-    <div className="welcome-row"><div><div className="eyebrow"><span className="live-dot"/> CLINIC WORKSPACE</div><h1>Appointments</h1><p>Choose a calendar day to see that day's patients and appointments.</p></div><button className="primary-button" onClick={openAddForm}>+ Add appointment</button></div>
-    {requestedReturn&&<button className="back-link" onClick={()=>navigate(returnTo)}>Back to patient</button>}
-    <div className="demo-notice"><CalendarDays size={16}/><span>WhatsApp confirmations require patient consent, a connected clinic WhatsApp account, and an approved appointment_reminder Utility template with body fields for patient name, appointment type, and date/time plus Coming and Not coming quick replies.</span></div>
-    {error&&<p className="auth-error" role="alert">{error}</p>}{notice&&<p className="auth-success" role="status">{notice}</p>}
-    <section className="panel appointment-calendar-panel">
-      <div className="appointment-calendar-heading"><button className="secondary-button" onClick={()=>shiftMonth(-1)}>Previous</button><h2>{firstOfMonth.toLocaleDateString('en-IN',{month:'long',year:'numeric'})}</h2><div className="appointment-calendar-actions"><input type="month" value={month} onChange={event=>{if(event.target.value){setMonth(event.target.value);setSelectedDate(`${event.target.value}-01`);}}} aria-label="Select appointment month"/><button className="secondary-button" onClick={()=>shiftMonth(1)}>Next</button></div></div>
-      <div className="appointment-calendar-grid">{['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(day=><div className="appointment-weekday" key={day}>{day}</div>)}{calendarCells.map((day,index)=>{
-        if(!day)return <div className="appointment-calendar-blank" key={`blank-${index}`}/>;
-        const key=`${month}-${String(day).padStart(2,'0')}`;
-        const count=countsByDate[key]||0;
-        return <button type="button" key={key} className={`appointment-calendar-day ${selectedDate===key?'selected-day':''} ${key===todayKey?'today-day':''} ${count?'has-appointments':''}`} aria-pressed={selectedDate===key} onClick={()=>setSelectedDate(key)}><span>{day}</span>{count>0&&<small>{count} appointment{count===1?'':'s'}</small>}</button>;
-      })}</div>
-      <div className="appointment-calendar-legend"><span><i className="calendar-today-dot"/> Today</span><span>Appointment counts update from saved clinic records.</span></div>
-    </section>
-    {showForm&&<section className="panel patient-form-panel"><div className="form-section-heading"><h2>Add an appointment</h2><p>Scheduled appointments also appear on the patient's record.</p></div><form className="admin-create-form" onSubmit={submit}>
-      <label>Patient<select required value={form.patient_id} onChange={event=>setForm(current=>({...current,patient_id:event.target.value}))}><option value="">Select a patient</option>{patients.map(patient=><option key={patient.id} value={patient.id}>{patient.name}</option>)}</select></label>
-      <label>Appointment type<input required minLength="2" maxLength="160" value={form.title} onChange={event=>setForm(current=>({...current,title:event.target.value}))} placeholder="Consultation or follow-up"/></label>
-      <label>Date and time<input required type="datetime-local" min={clinicDateTimeInput(new Date(),clinicTimezone)} value={form.starts_at} onChange={event=>setForm(current=>({...current,starts_at:event.target.value}))}/><small>Entered in the clinic's local time zone.</small></label>
-      <label>WhatsApp confirmation alert<select value={form.reminder_minutes_before} onChange={event=>setForm(current=>({...current,reminder_minutes_before:event.target.value}))}><option value="">No reminder</option><option value="1440">24 hours before</option><option value="60">1 hour before</option><option value="30">30 minutes before</option></select></label>
-      {form.reminder_minutes_before!==''&&!selectedPatient?.consent&&<p className="auth-error">This patient has no recorded WhatsApp consent. Record consent before requesting a reminder.</p>}
-      <label>Notes<textarea maxLength="2000" value={form.notes} onChange={event=>setForm(current=>({...current,notes:event.target.value}))} rows="3" placeholder="Optional appointment notes"/></label>
-      <button className="primary-button" disabled={saving||patients.length===0||(form.reminder_minutes_before!==''&&!selectedPatient?.consent)}>{saving?'Saving appointment...':'Save appointment'}</button>
-    </form>{patients.length===0&&<p className="empty-row">Add an active patient before scheduling.</p>}</section>}
-    <section className="panel section-table-panel appointment-day-panel"><div className="panel-heading"><div><h2>{new Date(`${selectedDate}T12:00:00`).toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long',year:'numeric'})}</h2><p>{registered.length} registered appointment{registered.length===1?'':'s'}{dayRows.length!==registered.length?` · ${dayRows.length-registered.length} cancelled`:''}</p></div><button className="primary-button" onClick={openAddForm}>+ Add appointment for this date</button></div>
-      <div className="metric-grid section-metrics appointment-day-metrics">{isPastSelectedDate?<><section className="metric-card"><div className="metric-label">Registered</div><div className="metric-number">{registered.length}</div></section><section className="metric-card"><div className="metric-label">Attended</div><div className="metric-number">{attended}</div></section><section className="metric-card"><div className="metric-label">Missed</div><div className="metric-number">{missed}</div></section><section className="metric-card"><div className="metric-label">Not marked</div><div className="metric-number">{registered.length-attended-missed}</div></section></>:<><section className="metric-card"><div className="metric-label">Registered</div><div className="metric-number">{registered.length}</div></section><section className="metric-card"><div className="metric-label">Coming</div><div className="metric-number">{coming}</div></section><section className="metric-card"><div className="metric-label">Not coming</div><div className="metric-number">{notComing}</div></section><section className="metric-card"><div className="metric-label">Awaiting reply</div><div className="metric-number">{awaiting}</div></section><section className="metric-card"><div className="metric-label">Confirmation not requested</div><div className="metric-number">{confirmationNotRequested}</div></section></>}</div>
-      {!isPastSelectedDate&&<p className="appointment-rsvp-note">Coming and Not coming counts update when patients reply to the WhatsApp appointment confirmation. Replies require an approved template with those two quick-reply buttons.</p>}
-      <div className="table-scroll"><table className="workspace-table appointment-attendance-table"><thead><tr><th>Time</th><th>Patient</th><th>Appointment</th><th>Notes</th><th>{isPastSelectedDate?'Attendance':'WhatsApp reply'}</th><th>Appointment status</th></tr></thead><tbody>{dayRows.map(row=><tr key={row.id}><td>{clinicDateTimeLabel(row.starts_at,clinicTimezone)}</td><td>{row.patient_name}</td><td>{row.title}</td><td>{row.notes||'\u2014'}</td><td>{isPastSelectedDate?(row.status==='cancelled'?'Cancelled':<select aria-label={`Attendance for ${row.patient_name}`} value={row.attendance_status} onChange={event=>updateAttendance(row,event.target.value)}><option value="unmarked">Not marked</option><option value="attended">Attended</option><option value="missed">Missed</option></select>):row.status==='cancelled'?'Cancelled':row.confirmation_status==='coming'?'Coming':row.confirmation_status==='not_coming'?'Not coming':['pending','sent','delivered','read'].includes(row.confirmation_status)?'Awaiting reply':row.confirmation_status==='failed'?'Message failed':row.confirmation_status==='skipped'?'Skipped':'Not requested'}</td><td><select aria-label={`Appointment status for ${row.patient_name}`} value={row.status} onChange={event=>updateStatus(row,event.target.value)}><option value="scheduled">Scheduled</option><option value="confirmed">Confirmed</option><option value="completed">Completed</option><option value="cancelled">Cancelled</option></select></td></tr>)}{loading&&<tr><td colSpan="6" className="empty-row">Loading appointments...</td></tr>}{!loading&&!error&&dayRows.length===0&&<tr><td colSpan="6" className="empty-row">No appointments on this date. Choose “Add appointment for this date” to schedule one.</td></tr>}</tbody></table></div>
-    </section>
-    <div className="metric-grid section-metrics appointment-metrics"><section className="metric-card"><div className="metric-label">Appointments this month</div><div className="metric-number">{loading?'?':rows.length}</div></section><section className="metric-card"><div className="metric-label">Scheduled</div><div className="metric-number">{loading?'?':scheduled}</div></section><section className="metric-card"><div className="metric-label">Confirmed</div><div className="metric-number">{loading?'?':confirmed}</div></section></div>
-    <footer className="page-footer"><span>Clinic appointment calendar</span><span>Month and day views</span></footer>
+    {!isDayView?<><div className="welcome-row"><div><div className="eyebrow"><span className="live-dot"/> CLINIC WORKSPACE</div><h1>Appointments</h1><p>Choose a date to view its appointments and attendance.</p></div><button className="primary-button" onClick={()=>openAddForm(todayKey)}>+ Add appointment</button></div>
+      <div className="demo-notice"><CalendarDays size={16}/><span>WhatsApp confirmations require patient consent, a connected clinic WhatsApp account, and an approved appointment_reminder Utility template with body fields for patient name, appointment type, and date/time plus Coming and Not coming quick replies.</span></div>
+      {error&&<p className="auth-error" role="alert">{error}</p>}
+      <section className="panel appointment-calendar-panel">
+        <div className="appointment-calendar-heading"><button className="secondary-button" onClick={()=>shiftMonth(-1)}>Previous</button><h2>{firstOfMonth.toLocaleDateString('en-IN',{month:'long',year:'numeric'})}</h2><div className="appointment-calendar-actions"><input type="month" value={effectiveMonth} onChange={event=>{if(event.target.value){setMonth(event.target.value);setSelectedDate(`${event.target.value}-01`);navigate(`/appointments?date=${event.target.value}-01`);}}} aria-label="Select appointment month"/><button className="secondary-button" onClick={()=>shiftMonth(1)}>Next</button></div></div>
+        <div className="appointment-calendar-grid">{['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(day=><div className="appointment-weekday" key={day}>{day}</div>)}{calendarCells.map((day,index)=>{if(!day)return <div className="appointment-calendar-blank" key={`blank-${index}`}/>;const key=`${effectiveMonth}-${String(day).padStart(2,'0')}`;const count=countsByDate[key]||0;return <button type="button" key={key} className={`appointment-calendar-day ${selectedDate===key?'selected-day':''} ${key===todayKey?'today-day':''} ${count?'has-appointments':''}`} aria-label={`${key}, ${count} appointments`} onClick={()=>navigate(`/appointments/day/${key}`)}><span>{day}</span>{count>0&&<small>{count} appointment{count===1?'':'s'}</small>}</button>;})}</div>
+        <div className="appointment-calendar-legend"><span><i className="calendar-today-dot"/> Today</span><span>Select a day to open its appointment dashboard.</span></div>
+      </section>
+    </>:<><button className="back-link" onClick={()=>navigate(`/appointments?date=${selectedDate}`)}>Back to calendar</button>
+      <div className="welcome-row"><div><div className="eyebrow"><span className="live-dot"/> SELECTED DATE</div><h1>{new Date(`${selectedDate}T12:00:00`).toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long',year:'numeric'})}</h1><p>{registered.length} registered appointment{registered.length===1?'':'s'}</p></div><button className="primary-button" onClick={()=>openAddForm(selectedDate)}>+ Add appointment</button></div>
+      <div className="demo-notice"><CalendarDays size={16}/><span>{isPastSelectedDate?'Mark each registered patient as attended or missed.':'Coming and Not coming totals update from WhatsApp replies when a confirmation alert was requested.'}</span></div>
+      {error&&<p className="auth-error" role="alert">{error}</p>}
+      <section className="panel section-table-panel appointment-day-panel">
+        <div className="panel-heading"><div><h2>{isPastSelectedDate?'Attendance summary':'Confirmation summary'}</h2><p>{registered.length} registered{dayRows.length!==registered.length?` ? ${dayRows.length-registered.length} cancelled`:''}</p></div><button className="secondary-button" onClick={()=>openAddForm(selectedDate)}>+ Add appointment for this date</button></div>
+        <div className="metric-grid section-metrics appointment-day-metrics">{isPastSelectedDate?<><section className="metric-card"><div className="metric-label">Registered</div><div className="metric-number">{registered.length}</div></section><section className="metric-card"><div className="metric-label">Attended</div><div className="metric-number">{attended}</div></section><section className="metric-card"><div className="metric-label">Missed</div><div className="metric-number">{missed}</div></section><section className="metric-card"><div className="metric-label">Not marked</div><div className="metric-number">{registered.length-attended-missed}</div></section></>:<><section className="metric-card"><div className="metric-label">Registered</div><div className="metric-number">{registered.length}</div></section><section className="metric-card"><div className="metric-label">Coming</div><div className="metric-number">{coming}</div></section><section className="metric-card"><div className="metric-label">Not coming</div><div className="metric-number">{notComing}</div></section><section className="metric-card"><div className="metric-label">Awaiting reply</div><div className="metric-number">{awaiting}</div></section><section className="metric-card"><div className="metric-label">Alert not requested</div><div className="metric-number">{confirmationNotRequested}</div></section></>}</div>
+        <div className="table-scroll"><table className="workspace-table appointment-attendance-table"><thead><tr><th>Time</th><th>Patient</th><th>Appointment</th><th>Notes</th><th>{isPastSelectedDate?'Attendance':'WhatsApp reply'}</th><th>Appointment status</th></tr></thead><tbody>{dayRows.map(row=><tr key={row.id}><td>{clinicDateTimeLabel(row.starts_at,clinicTimezone)}</td><td>{row.patient_name}</td><td>{row.title}</td><td>{row.notes||'?'}</td><td>{isPastSelectedDate?(row.status==='cancelled'?'Cancelled':<select aria-label={`Attendance for ${row.patient_name}`} value={row.attendance_status} onChange={event=>updateAttendance(row,event.target.value)}><option value="unmarked">Not marked</option><option value="attended">Attended</option><option value="missed">Missed</option></select>):row.status==='cancelled'?'Cancelled':row.confirmation_status==='coming'?'Coming':row.confirmation_status==='not_coming'?'Not coming':['pending','sent','delivered','read'].includes(row.confirmation_status)?'Awaiting reply':row.confirmation_status==='failed'?'Message failed':row.confirmation_status==='skipped'?'Skipped':'Not requested'}</td><td><select aria-label={`Appointment status for ${row.patient_name}`} value={row.status} onChange={event=>updateStatus(row,event.target.value)}><option value="scheduled">Scheduled</option><option value="confirmed">Confirmed</option><option value="completed">Completed</option><option value="cancelled">Cancelled</option></select></td></tr>)}{loading&&<tr><td colSpan="6" className="empty-row">Loading appointments...</td></tr>}{!loading&&!error&&dayRows.length===0&&<tr><td colSpan="6" className="empty-row">No appointments for this date. Use Add appointment to schedule one.</td></tr>}</tbody></table></div>
+      </section>
+    </>}
+    <footer className="page-footer"><span>Clinic appointment management</span><span>{isDayView?'Selected date':'Month calendar'}</span></footer>
   </div>;
 }
-
 function MedicineAutocomplete({value,onChange}) {
   const [items,setItems] = useState([]);
   const [open,setOpen] = useState(false);

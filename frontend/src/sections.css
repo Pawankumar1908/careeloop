@@ -111,8 +111,18 @@
 .appointment-day-metrics .metric-number{font-size:calc(var(--text-scale, 1) * 22px)}
 .appointment-rsvp-note{margin:0 0 10px;color:#78878b;font-size:10px;line-height:1.5}
 .appointment-attendance-table select{min-width:130px}
+.appointment-patient-tabs{display:flex;gap:8px;margin:4px 0 18px;border-bottom:1px solid #e8efed}
+.appointment-patient-tabs button{min-height:38px;padding:0 14px;border:0;border-bottom:2px solid transparent;background:transparent;color:#728286;font:600 11px 'DM Sans',sans-serif;cursor:pointer}
+.appointment-patient-tabs button.selected-tab{border-bottom-color:#16806d;color:#16806d}
+.appointment-patient-tabs button:focus-visible{outline:2px solid #16806d;outline-offset:2px}
+.appointment-new-patient-fields{grid-template-columns:repeat(2,minmax(0,1fr));margin:0 0 15px}
+.appointment-duplicate-match{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 15px;padding:10px 12px;border:1px solid #e8c994;border-radius:7px;background:#fffaf0;color:#745522;font-size:11px}
+.appointment-new-patient-fields .appointment-consent{display:flex;flex-direction:row;align-items:center;gap:8px;grid-column:1/-1;font-weight:500}
+.appointment-new-patient-fields .appointment-consent input{width:16px;height:16px;accent-color:#16806d}
+.appointment-form-subheading{margin:4px 0 10px}
+.patient-table{min-width:900px}
 .patient-appointment-editor{padding:15px;margin:0 0 20px;border:1px solid #e8efed;border-radius:9px;background:#fbfdfc}
 .appointment-inline-fields{grid-template-columns:repeat(3,minmax(0,1fr));margin-bottom:12px}
 .patient-next-appointment small{display:block;margin-top:5px;color:#899792;font-size:10px}
 .admin-create-form select,.admin-create-form textarea{width:100%;font:400 12px 'DM Sans',sans-serif}
-@media(max-width:700px){.appointment-calendar-heading{grid-template-columns:1fr 1fr}.appointment-calendar-heading h2{grid-column:1/-1;grid-row:1}.appointment-calendar-heading>.secondary-button{grid-row:2}.appointment-calendar-actions{grid-column:2;grid-row:2;justify-content:flex-end}.appointment-calendar-actions input{width:140px}.appointment-calendar-blank,.appointment-calendar-day{min-height:54px}.appointment-calendar-day{padding:6px}.appointment-calendar-day small{font-size:8px}.appointment-calendar-legend{align-items:flex-start;flex-direction:column}.appointment-inline-fields{grid-template-columns:1fr}}
+@media(max-width:700px){.appointment-calendar-heading{grid-template-columns:1fr 1fr}.appointment-calendar-heading h2{grid-column:1/-1;grid-row:1}.appointment-calendar-heading>.secondary-button{grid-row:2}.appointment-calendar-actions{grid-column:2;grid-row:2;justify-content:flex-end}.appointment-calendar-actions input{width:140px}.appointment-calendar-blank,.appointment-calendar-day{min-height:54px}.appointment-calendar-day{padding:6px}.appointment-calendar-day small{font-size:8px}.appointment-calendar-legend{align-items:flex-start;flex-direction:column}.appointment-inline-fields{grid-template-columns:1fr}.appointment-new-patient-fields{grid-template-columns:1fr}.appointment-new-patient-fields .appointment-consent{grid-column:1}}
