@@ -6,7 +6,7 @@ import json
 import logging
 import os
 import uuid
-from datetime import datetime, time, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -22,9 +22,9 @@ from sqlalchemy.orm import Session
 from app.auth import access_token, create_refresh, current_user, hash_password, token_hash, verify_password
 from app.config import settings
 from app.db import SessionLocal, get_db
-from app.models import Clinic, MedicationReminder, MedicationSchedule, Patient, RefreshSession, Role, User, WhatsAppConnection
-from app.schemas import AdminClinicCreateIn, ClinicMemberCreateIn, MedicationScheduleIn, PatientCreateIn, RegisterIn, WhatsAppConnectIn, WhatsAppTestMessageIn
-from app.whatsapp_service import WhatsAppAPIError, decrypt_access_token, encrypt_access_token, get_phone_details, send_medication_reminder, send_test_template
+from app.models import Clinic, ClinicAppointment, MedicationReminder, MedicationSchedule, Patient, RefreshSession, Role, User, WhatsAppConnection
+from app.schemas import AdminClinicCreateIn, AppointmentCreateIn, ClinicMemberCreateIn, MedicationScheduleIn, PatientCreateIn, RegisterIn, WhatsAppConnectIn, WhatsAppTestMessageIn
+from app.whatsapp_service import WhatsAppAPIError, decrypt_access_token, encrypt_access_token, get_phone_details, send_appointment_reminder, send_medication_reminder, send_test_template
 
 app = FastAPI(title="ClinicCare API", version="0.1.0")
 app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origin_list, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
@@ -512,13 +512,137 @@ def patients(user: User = Depends(current_user), db: Session = Depends(get_db)):
     by_patient = {}
     for schedule in schedule_rows:
         by_patient.setdefault(schedule.patient_id, []).append(schedule)
-    return [_patient_payload(p, by_patient.get(p.id, [])) for p in rows]
+    next_appointments = {}
+    if rows:
+        appointment_rows = db.execute(
+            select(ClinicAppointment, Patient.id)
+            .join(Patient, Patient.id == ClinicAppointment.patient_id)
+            .where(
+                ClinicAppointment.clinic_id == user.clinic_id,
+                ClinicAppointment.patient_id.in_([p.id for p in rows]),
+                ClinicAppointment.status.in_(("scheduled", "confirmed")),
+                ClinicAppointment.starts_at >= datetime.now(timezone.utc),
+            )
+            .order_by(ClinicAppointment.starts_at)
+        ).all()
+        for appointment, patient_id in appointment_rows:
+            next_appointments.setdefault(patient_id, {
+                "id": str(appointment.id), "title": appointment.title,
+                "starts_at": appointment.starts_at,
+                "reminder_minutes_before": appointment.reminder_minutes_before,
+                "reminder_status": appointment.reminder_status,
+            })
+    payloads = []
+    for patient in rows:
+        payload = _patient_payload(patient, by_patient.get(patient.id, []))
+        payload["next_appointment"] = next_appointments.get(patient.id)
+        payloads.append(payload)
+    return payloads
 
 
 def clinic_context(user: User) -> uuid.UUID:
     if user.role == Role.platform_admin or not user.clinic_id:
         raise HTTPException(403, "Clinic context required")
     return user.clinic_id
+
+
+@app.get("/api/clinic/appointments")
+def clinic_appointments(
+    month: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
+    patient_id: uuid.UUID | None = None,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    clinic_id = clinic_context(user)
+    clinic = db.get(Clinic, clinic_id)
+    if not clinic:
+        raise HTTPException(404, "Clinic not found")
+    clinic_zone = ZoneInfo(clinic.timezone)
+    local_today = datetime.now(clinic_zone).date()
+    if month:
+        try:
+            year, month_number = (int(part) for part in month.split("-"))
+            month_start_date = date(year, month_number, 1)
+        except ValueError as exc:
+            raise HTTPException(422, "Month must use YYYY-MM format") from exc
+    else:
+        month_start_date = local_today.replace(day=1)
+    if month_start_date.month == 12:
+        month_end_date = date(month_start_date.year + 1, 1, 1)
+    else:
+        month_end_date = date(month_start_date.year, month_start_date.month + 1, 1)
+    month_start = datetime.combine(month_start_date, time.min, tzinfo=clinic_zone).astimezone(timezone.utc)
+    month_end = datetime.combine(month_end_date, time.min, tzinfo=clinic_zone).astimezone(timezone.utc)
+    query = select(ClinicAppointment, Patient).join(Patient, Patient.id == ClinicAppointment.patient_id).where(
+        ClinicAppointment.clinic_id == clinic_id,
+        ClinicAppointment.starts_at >= month_start,
+        ClinicAppointment.starts_at < month_end,
+    )
+    if patient_id:
+        query = query.where(ClinicAppointment.patient_id == patient_id)
+    rows = db.execute(query.order_by(ClinicAppointment.starts_at, Patient.name)).all()
+    return [{
+        "id": str(appointment.id), "patient_id": str(patient.id), "patient_name": patient.name,
+        "title": appointment.title, "starts_at": appointment.starts_at,
+        "notes": appointment.notes or "", "status": appointment.status,
+        "reminder_minutes_before": appointment.reminder_minutes_before,
+        "reminder_status": appointment.reminder_status,
+        "reminder_sent_at": appointment.reminder_sent_at,
+        "reminder_error": appointment.reminder_error,
+    } for appointment, patient in rows]
+
+
+@app.post("/api/clinic/appointments", status_code=201)
+def create_clinic_appointment(body: AppointmentCreateIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    clinic_id = clinic_context(user)
+    patient = db.scalar(select(Patient).where(
+        Patient.id == body.patient_id, Patient.clinic_id == clinic_id, Patient.is_active.is_(True)
+    ))
+    if not patient:
+        raise HTTPException(404, "Active patient not found in this clinic")
+    if not body.title.strip():
+        raise HTTPException(422, "Appointment type is required")
+    if body.reminder_minutes_before is not None and patient.consent_status != "opted_in":
+        raise HTTPException(409, "Record the patient's WhatsApp reminder consent before scheduling an appointment reminder")
+    clinic = db.get(Clinic, clinic_id)
+    clinic_zone = ZoneInfo(clinic.timezone)
+    starts_at = body.starts_at
+    if starts_at.tzinfo is None:
+        starts_at = starts_at.replace(tzinfo=clinic_zone)
+    starts_at = starts_at.astimezone(timezone.utc)
+    if starts_at <= datetime.now(timezone.utc):
+        raise HTTPException(422, "Appointment date and time must be in the future")
+    appointment = ClinicAppointment(
+        clinic_id=clinic_id, patient_id=patient.id, title=body.title.strip(),
+        starts_at=starts_at, notes=body.notes.strip() or None, status="scheduled",
+        reminder_minutes_before=body.reminder_minutes_before,
+        reminder_status="pending" if body.reminder_minutes_before is not None else "not_requested",
+        created_by_id=user.id,
+    )
+    db.add(appointment)
+    db.commit()
+    db.refresh(appointment)
+    return {"id": str(appointment.id), "patient_id": str(patient.id), "patient_name": patient.name,
+            "title": appointment.title, "starts_at": appointment.starts_at,
+            "notes": appointment.notes or "", "status": appointment.status,
+            "reminder_minutes_before": appointment.reminder_minutes_before,
+            "reminder_status": appointment.reminder_status}
+
+
+@app.patch("/api/clinic/appointments/{appointment_id}")
+def update_clinic_appointment(appointment_id: uuid.UUID, status: str = Query(pattern="^(scheduled|confirmed|completed|cancelled)$"), user: User = Depends(current_user), db: Session = Depends(get_db)):
+    clinic_id = clinic_context(user)
+    appointment = db.scalar(select(ClinicAppointment).where(
+        ClinicAppointment.id == appointment_id, ClinicAppointment.clinic_id == clinic_id
+    ))
+    if not appointment:
+        raise HTTPException(404, "Appointment not found")
+    appointment.status = status
+    if status in {"completed", "cancelled"} and appointment.reminder_status == "pending":
+        appointment.reminder_status = "skipped"
+        appointment.reminder_error = "Appointment was closed before the reminder was sent."
+    db.commit()
+    return {"id": str(appointment.id), "status": appointment.status, "reminder_status": appointment.reminder_status, "reminder_error": appointment.reminder_error}
 
 
 @app.get("/api/clinic/dashboard")
@@ -653,6 +777,7 @@ async def _medication_reminder_worker():
     while True:
         try:
             await _dispatch_due_medication_reminders()
+            await _dispatch_due_appointment_reminders()
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -716,6 +841,54 @@ async def _dispatch_due_medication_reminders():
                     reminder.status = "failed"
                     logger.exception("WhatsApp medication reminder send failed")
                 db.commit()
+
+
+async def _dispatch_due_appointment_reminders():
+    now = datetime.now(timezone.utc)
+    logger = logging.getLogger(__name__)
+    with SessionLocal() as db:
+        appointments = db.scalars(select(ClinicAppointment).where(
+            ClinicAppointment.reminder_status == "pending",
+            ClinicAppointment.reminder_minutes_before.is_not(None),
+            ClinicAppointment.status.in_(("scheduled", "confirmed")),
+        ).order_by(ClinicAppointment.starts_at)).all()
+        for appointment in appointments:
+            if appointment.starts_at <= now:
+                appointment.reminder_status = "skipped"
+                appointment.reminder_error = "Appointment time passed before the reminder could be sent."
+                db.commit()
+                continue
+            send_at = appointment.starts_at - timedelta(minutes=appointment.reminder_minutes_before or 0)
+            if send_at > now:
+                continue
+            patient = db.get(Patient, appointment.patient_id)
+            clinic = db.get(Clinic, appointment.clinic_id)
+            if not patient or not patient.is_active or patient.consent_status != "opted_in":
+                appointment.reminder_status = "skipped"
+                appointment.reminder_error = "Patient has not consented to WhatsApp reminders."
+                db.commit()
+                continue
+            connection = db.scalar(select(WhatsAppConnection).where(WhatsAppConnection.clinic_id == appointment.clinic_id))
+            if not connection or not clinic:
+                continue
+            try:
+                clinic_zone = ZoneInfo(clinic.timezone)
+                appointment_time = appointment.starts_at.astimezone(clinic_zone).strftime("%A, %d %B at %I:%M %p")
+                token = decrypt_access_token(connection.encrypted_access_token)
+                result = await send_appointment_reminder(
+                    connection.phone_number_id, token, patient.phone_e164.lstrip("+"),
+                    patient.name, appointment.title, appointment_time,
+                )
+                message = (result.get("messages") or [{}])[0]
+                appointment.reminder_status = "sent"
+                appointment.reminder_sent_at = datetime.now(timezone.utc)
+                appointment.reminder_message_id = message.get("id")
+                appointment.reminder_error = None
+            except Exception as exc:
+                appointment.reminder_status = "failed"
+                appointment.reminder_error = str(exc)[:2000]
+                logger.exception("WhatsApp appointment reminder send failed")
+            db.commit()
 
 
 @app.post("/api/patients", status_code=201)

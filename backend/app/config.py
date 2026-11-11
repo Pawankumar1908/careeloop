@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173"
     whatsapp_api_version: str = "v23.0"
     whatsapp_reminder_template_name: str = "medication_reminder"
+    whatsapp_appointment_template_name: str = "appointment_reminder"
     whatsapp_template_language: str = "en_US"
     whatsapp_token_encryption_key: str = ""
     whatsapp_webhook_verify_token: str = ""

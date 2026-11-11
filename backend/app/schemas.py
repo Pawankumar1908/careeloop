@@ -25,6 +25,14 @@ class ClinicMemberCreateIn(BaseModel):
     password: str = Field(min_length=12, max_length=128)
 
 
+class AppointmentCreateIn(BaseModel):
+    patient_id: uuid.UUID
+    title: str = Field(min_length=2, max_length=160)
+    starts_at: datetime
+    notes: str = Field(default="", max_length=2000)
+    reminder_minutes_before: int | None = Field(default=None, ge=15, le=10080)
+
+
 class AdminClinicOut(BaseModel):
     id: str
     name: str

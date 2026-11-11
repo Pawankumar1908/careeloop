@@ -152,3 +152,45 @@ async def send_medication_reminder(
     if not isinstance(data, dict):
         raise WhatsAppAPIError("Meta returned an unexpected response for the medication reminder.")
     return data
+
+
+async def send_appointment_reminder(
+    phone_number_id: str,
+    token: str,
+    recipient: str,
+    patient_name: str,
+    appointment_title: str,
+    appointment_time: str,
+) -> dict:
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": recipient,
+        "type": "template",
+        "template": {
+            "name": settings.whatsapp_appointment_template_name,
+            "language": {"code": settings.whatsapp_template_language},
+            "components": [{"type": "body", "parameters": [
+                {"type": "text", "text": patient_name},
+                {"type": "text", "text": appointment_title},
+                {"type": "text", "text": appointment_time},
+            ]}],
+        },
+    }
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            response = await client.post(
+                _graph_url(f"{phone_number_id}/messages"),
+                json=payload,
+                headers={"Authorization": f"Bearer {token}"},
+            )
+    except httpx.HTTPError as exc:
+        raise WhatsAppAPIError("Could not reach Meta while sending the appointment reminder.") from exc
+    if response.is_error:
+        raise WhatsAppAPIError(_meta_error_message(response, "Meta rejected the appointment reminder template."))
+    try:
+        data = response.json()
+    except ValueError as exc:
+        raise WhatsAppAPIError("Meta returned an invalid response for the appointment reminder.") from exc
+    if not isinstance(data, dict):
+        raise WhatsAppAPIError("Meta returned an unexpected response for the appointment reminder.")
+    return data
