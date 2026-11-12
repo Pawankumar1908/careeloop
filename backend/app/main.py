@@ -24,7 +24,7 @@ from app.config import settings
 from app.db import SessionLocal, get_db
 from app.models import Clinic, ClinicAppointment, ClinicAppointmentDay, MedicationReminder, MedicationSchedule, Patient, RefreshSession, Role, User, WhatsAppConnection
 from app.phone import normalize_indian_phone, whatsapp_recipient
-from app.schemas import AdminClinicCreateIn, AppointmentCreateIn, AppointmentDaySettingsIn, AppointmentUpdateIn, ClinicHoursIn, ClinicMemberCreateIn, MedicationScheduleIn, PatientCreateIn, RegisterIn, WhatsAppConnectIn, WhatsAppTestMessageIn
+from app.schemas import AdminClinicCreateIn, AppointmentCreateIn, AppointmentDaySettingsIn, AppointmentEditIn, AppointmentUpdateIn, ClinicHoursIn, ClinicMemberCreateIn, MedicationScheduleIn, PatientCreateIn, RegisterIn, WhatsAppConnectIn, WhatsAppTestMessageIn
 from app.whatsapp_service import WhatsAppAPIError, decrypt_access_token, encrypt_access_token, get_phone_details, send_appointment_reminder, send_medication_reminder, send_test_template
 
 app = FastAPI(title="ClinicCare API", version="0.1.0")
@@ -759,6 +759,71 @@ def create_clinic_appointment(body: AppointmentCreateIn, user: User = Depends(cu
             "reminder_minutes_before": appointment.reminder_minutes_before,
             "reminder_status": appointment.reminder_status,
             "confirmation_status": appointment.confirmation_status,
+            "attendance_status": appointment.attendance_status}
+
+
+@app.put("/api/clinic/appointments/{appointment_id}")
+def edit_clinic_appointment(appointment_id: uuid.UUID, body: AppointmentEditIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    clinic_id = clinic_context(user)
+    appointment = db.scalar(select(ClinicAppointment).where(
+        ClinicAppointment.id == appointment_id, ClinicAppointment.clinic_id == clinic_id
+    ))
+    if not appointment:
+        raise HTTPException(404, "Appointment not found")
+    patient = db.scalar(select(Patient).where(
+        Patient.id == body.patient_id, Patient.clinic_id == clinic_id, Patient.is_active.is_(True)
+    ))
+    if not patient:
+        raise HTTPException(404, "Active patient not found in this clinic")
+    if body.reminder_minutes_before is not None and patient.consent_status != "opted_in":
+        raise HTTPException(409, "Record the patient's WhatsApp reminder consent before scheduling an appointment reminder")
+    clinic = db.get(Clinic, clinic_id)
+    clinic_zone = ZoneInfo(clinic.timezone)
+    starts_at = body.starts_at
+    if starts_at.tzinfo is None:
+        starts_at = starts_at.replace(tzinfo=clinic_zone)
+    starts_at = starts_at.astimezone(timezone.utc)
+    now = datetime.now(timezone.utc)
+    if starts_at <= now:
+        raise HTTPException(422, "Appointment date and time must be in the future")
+    local_starts_at = starts_at.astimezone(clinic_zone)
+    opening = time.fromisoformat(clinic.opening_time)
+    closing = time.fromisoformat(clinic.closing_time)
+    if local_starts_at.time().replace(tzinfo=None) < opening or (local_starts_at + timedelta(minutes=appointment.duration_minutes)).time().replace(tzinfo=None) > closing:
+        raise HTTPException(422, "Appointment must fit within clinic hours")
+    local_date = local_starts_at.date()
+    if db.bind and db.bind.dialect.name == "postgresql":
+        db.execute(select(func.pg_advisory_xact_lock(func.hashtext(f"{clinic_id}:{local_date}"))))
+    candidate_end = starts_at + timedelta(minutes=appointment.duration_minutes)
+    possible_conflicts = db.scalars(select(ClinicAppointment).where(
+        ClinicAppointment.clinic_id == clinic_id,
+        ClinicAppointment.id != appointment.id,
+        ClinicAppointment.status.in_(("scheduled", "confirmed")),
+        ClinicAppointment.starts_at < candidate_end,
+        ClinicAppointment.starts_at >= starts_at - timedelta(minutes=15),
+    )).all()
+    conflict = next((item for item in possible_conflicts if item.starts_at + timedelta(minutes=item.duration_minutes) > starts_at), None)
+    if conflict:
+        raise HTTPException(409, "This time overlaps an existing appointment. Choose another time.")
+    appointment.patient_id = patient.id
+    appointment.title = body.title.strip()
+    appointment.starts_at = starts_at
+    appointment.notes = body.notes.strip() or None
+    appointment.reminder_minutes_before = body.reminder_minutes_before
+    appointment.reminder_sent_at = None
+    appointment.reminder_message_id = None
+    appointment.confirmation_message_id = None
+    appointment.confirmation_responded_at = None
+    appointment.reminder_error = None
+    appointment.reminder_status = "pending" if body.reminder_minutes_before is not None else "not_requested"
+    appointment.confirmation_status = "pending" if body.reminder_minutes_before is not None else "not_requested"
+    db.commit()
+    db.refresh(appointment)
+    return {"id": str(appointment.id), "patient_id": str(patient.id), "patient_name": patient.name,
+            "title": appointment.title, "starts_at": appointment.starts_at,
+            "duration_minutes": appointment.duration_minutes, "notes": appointment.notes or "",
+            "status": appointment.status, "reminder_minutes_before": appointment.reminder_minutes_before,
+            "reminder_status": appointment.reminder_status, "confirmation_status": appointment.confirmation_status,
             "attendance_status": appointment.attendance_status}
 
 

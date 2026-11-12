@@ -50,6 +50,14 @@ class AppointmentCreateIn(BaseModel):
         return value
 
 
+class AppointmentEditIn(BaseModel):
+    patient_id: uuid.UUID
+    title: str = Field(min_length=2, max_length=160)
+    starts_at: datetime
+    notes: str = Field(default="", max_length=2000)
+    reminder_minutes_before: int | None = Field(default=None, ge=15, le=10080)
+
+
 class ClinicHoursIn(BaseModel):
     opening_time: str = Field(pattern=r"^([01]\d|2[0-3]):00$")
     closing_time: str = Field(pattern=r"^([01]\d|2[0-3]):00$")
