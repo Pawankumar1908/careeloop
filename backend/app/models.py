@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import date, datetime, timezone
 
-from sqlalchemy import Boolean, Date, DateTime, Enum, ForeignKey, Index, JSON, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, Date, DateTime, Enum, ForeignKey, Index, JSON, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -51,7 +51,7 @@ class Patient(Base):
     __table_args__ = (
         Index("ix_patient_clinic_phone", "clinic_id", "phone_e164"),
         Index("ix_patient_clinic_name", "clinic_id", "name"),
-        Index("uq_patient_clinic_name_phone", "clinic_id", func.lower(func.trim(name)), "phone_e164", unique=True),
+        Index("uq_patient_clinic_name_phone", "clinic_id", text("lower(trim(name))"), "phone_e164", unique=True),
     )
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     clinic_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("clinics.id", ondelete="CASCADE"), index=True)
