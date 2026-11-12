@@ -225,7 +225,12 @@ function App() {
     if (!adminSession) return signOut();
     try {
       const returned = await rotateSession({ ...adminSession, refresh_token: auth?.refresh_token || adminSession.refresh_token });
-      const { platform_access_token, ...platformSession } = returned;
+      const platformSession = {
+        ...returned,
+        access_token: returned.platform_access_token,
+        user: adminSession.user,
+      };
+      delete platformSession.platform_access_token;
       window.sessionStorage.setItem('careloop-auth-session', JSON.stringify(platformSession));
       window.sessionStorage.removeItem('careloop-platform-session');
       setAuth(platformSession); setAdminSession(null);

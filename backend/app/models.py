@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import date, datetime, timezone
 
-from sqlalchemy import Boolean, Date, DateTime, Enum, ForeignKey, Index, JSON, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Date, DateTime, Enum, ForeignKey, Index, JSON, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -48,10 +48,16 @@ class User(Base):
 
 class Patient(Base):
     __tablename__ = "patients"
-    __table_args__ = (UniqueConstraint("clinic_id", "phone_e164", name="uq_patient_clinic_phone"), Index("ix_patient_clinic_name", "clinic_id", "name"))
+    __table_args__ = (
+        Index("ix_patient_clinic_phone", "clinic_id", "phone_e164"),
+        Index("ix_patient_clinic_name", "clinic_id", "name"),
+        Index("uq_patient_clinic_name_phone", "clinic_id", func.lower(func.trim(name)), "phone_e164", unique=True),
+    )
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     clinic_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("clinics.id", ondelete="CASCADE"), index=True)
     name: Mapped[str] = mapped_column(String(160))
+    age: Mapped[int | None] = mapped_column(nullable=True)
+    gender: Mapped[str | None] = mapped_column(String(32), nullable=True)
     phone_e164: Mapped[str] = mapped_column(String(16))
     preferred_language: Mapped[str] = mapped_column(String(16), default="en")
     consent_status: Mapped[str] = mapped_column(String(16), default="unknown")

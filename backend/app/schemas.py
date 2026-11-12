@@ -121,10 +121,20 @@ class MedicationScheduleIn(BaseModel):
 
 class PatientCreateIn(BaseModel):
     name: str = Field(min_length=1, max_length=160)
+    age: int | None = Field(default=None, ge=0, le=120)
+    gender: str | None = Field(default=None, max_length=32)
     phone_e164: str
     preferred_language: str = Field(default="en", min_length=2, max_length=16)
     consent: bool = False
     medications: list[MedicationScheduleIn] = Field(default_factory=list, max_length=30)
+
+    @field_validator("name")
+    @classmethod
+    def validate_patient_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Patient name is required")
+        return value
 
     @field_validator("phone_e164")
     @classmethod

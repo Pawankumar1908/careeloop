@@ -759,6 +759,8 @@ def _patient_payload(patient: Patient, schedules: list[MedicationSchedule]):
     return {
         "id": str(patient.id),
         "name": patient.name,
+        "age": patient.age,
+        "gender": patient.gender,
         "phone_e164": patient.phone_e164,
         "preferred_language": patient.preferred_language,
         "consent": patient.consent_status == "opted_in",
@@ -937,9 +939,17 @@ async def _dispatch_due_appointment_reminders():
 @app.post("/api/patients", status_code=201)
 def create_patient(body: PatientCreateIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     clinic_id = clinic_context(user)
+    clean_name = body.name.strip()
+    duplicate = db.scalar(select(Patient.id).where(
+        Patient.clinic_id == clinic_id,
+        func.lower(func.trim(Patient.name)) == clean_name.lower(),
+        Patient.phone_e164 == body.phone_e164,
+    ))
+    if duplicate:
+        raise HTTPException(409, "A patient with this name and mobile number is already registered. Select the existing patient instead.")
     clinic = db.get(Clinic, clinic_id)
     patient = Patient(
-        clinic_id=clinic_id, name=body.name.strip(), phone_e164=body.phone_e164,
+        clinic_id=clinic_id, name=clean_name, age=body.age, gender=body.gender.strip() if body.gender else None, phone_e164=body.phone_e164,
         preferred_language=body.preferred_language,
         consent_status="opted_in" if body.consent else "unknown",
         consent_source="Clinic-recorded" if body.consent else None,
@@ -952,7 +962,7 @@ def create_patient(body: PatientCreateIn, user: User = Depends(current_user), db
         db.commit()
     except IntegrityError as exc:
         db.rollback()
-        raise HTTPException(409, "A patient with this phone number already exists in the clinic") from exc
+        raise HTTPException(409, "A patient with this name and mobile number is already registered. Select the existing patient instead.") from exc
     schedules = db.scalars(select(MedicationSchedule).where(MedicationSchedule.patient_id == patient.id)).all()
     return _patient_payload(patient, schedules)
 
@@ -963,8 +973,19 @@ def update_patient(patient_id: uuid.UUID, body: PatientCreateIn, user: User = De
     patient = db.scalar(select(Patient).where(Patient.id == patient_id, Patient.clinic_id == clinic_id))
     if not patient:
         raise HTTPException(404, "Patient not found")
+    clean_name = body.name.strip()
+    duplicate = db.scalar(select(Patient.id).where(
+        Patient.clinic_id == clinic_id,
+        Patient.id != patient.id,
+        func.lower(func.trim(Patient.name)) == clean_name.lower(),
+        Patient.phone_e164 == body.phone_e164,
+    ))
+    if duplicate:
+        raise HTTPException(409, "A patient with this name and mobile number is already registered.")
     clinic = db.get(Clinic, clinic_id)
-    patient.name = body.name.strip()
+    patient.name = clean_name
+    patient.age = body.age
+    patient.gender = body.gender.strip() if body.gender else None
     patient.phone_e164 = body.phone_e164
     patient.preferred_language = body.preferred_language
     patient.consent_status = "opted_in" if body.consent else "unknown"
@@ -975,7 +996,7 @@ def update_patient(patient_id: uuid.UUID, body: PatientCreateIn, user: User = De
         db.commit()
     except IntegrityError as exc:
         db.rollback()
-        raise HTTPException(409, "A patient with this phone number already exists in the clinic") from exc
+        raise HTTPException(409, "A patient with this name and mobile number is already registered.") from exc
     schedules = db.scalars(select(MedicationSchedule).where(MedicationSchedule.patient_id == patient.id)).all()
     return _patient_payload(patient, schedules)
 
