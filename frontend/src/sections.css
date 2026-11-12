@@ -115,6 +115,32 @@
 .appointment-patient-tabs button{min-height:38px;padding:0 14px;border:0;border-bottom:2px solid transparent;background:transparent;color:#728286;font:600 11px 'DM Sans',sans-serif;cursor:pointer}
 .appointment-patient-tabs button.selected-tab{border-bottom-color:#16806d;color:#16806d}
 .appointment-patient-tabs button:focus-visible{outline:2px solid #16806d;outline-offset:2px}
+.appointment-patient-picker{position:relative}
+.appointment-patient-picker>input{width:100%}
+.appointment-patient-options{position:absolute;z-index:20;top:calc(100% + 4px);left:0;right:0;max-height:240px;overflow-y:auto;border:1px solid #dfe8e4;border-radius:8px;background:#fff;box-shadow:0 10px 24px #233c331c}
+.appointment-patient-options button{display:block;width:100%;padding:10px 12px;border:0;background:#fff;color:#34464b;text-align:left;font:400 12px 'DM Sans',sans-serif;cursor:pointer}
+.appointment-patient-options button:hover,.appointment-patient-options button:focus-visible,.appointment-patient-options button[aria-selected="true"]{background:#edf6f2;color:#16806d;outline:none}
+.appointment-patient-empty{padding:11px 12px;color:#899792;font-size:11px}
+.appointment-time-toggle{display:flex;align-items:center;gap:9px;margin:14px 0;color:#4e625c;font-size:12px;font-weight:600}
+.appointment-time-toggle input{width:16px;height:16px;accent-color:#16806d}
+.appointment-slot-panel{padding:16px;margin-bottom:16px}
+.appointment-slot-heading{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:12px}
+.appointment-slot-heading h2{margin:0 0 4px;font-size:16px}
+.appointment-slot-heading p{margin:0;color:#899792;font-size:11px}
+.appointment-slot-presets{display:flex;gap:6px}
+.appointment-slot-presets button{min-width:38px;height:34px;border:1px solid #dfe8e4;border-radius:7px;background:#fff;color:#546660;font:600 12px 'DM Sans',sans-serif;cursor:pointer}
+.appointment-slot-presets button.selected-slot-preset{border-color:#16806d;background:#eaf6f2;color:#16806d}
+.appointment-slot-presets button:disabled{opacity:.55;cursor:wait}
+.appointment-slot-hour{border-top:1px solid #e8efed}
+.appointment-slot-hour summary{padding:12px 4px;color:#34464b;font-size:12px;font-weight:700;cursor:pointer}
+.appointment-slot-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;padding:0 0 12px}
+.appointment-slot{display:flex;flex-direction:column;align-items:flex-start;gap:4px;min-height:54px;padding:9px 11px;border:1px solid;border-radius:8px;text-align:left}
+.appointment-slot b{font-size:12px}
+.appointment-slot small{font-size:10px}
+.appointment-slot.slot-available{border-color:#b6dfca;background:#effaf3;color:#20764a;cursor:pointer}
+.appointment-slot.slot-available:hover{background:#dcf4e5}
+.appointment-slot.slot-booked{border-color:#efc1bd;background:#fff1f0;color:#a8443c;cursor:not-allowed}
+.appointment-overlap-warning{display:block;margin-top:4px;color:#b54d47;font-size:10px;font-weight:600}
 .appointment-new-patient-fields{grid-template-columns:repeat(2,minmax(0,1fr));margin:0 0 15px}
 .appointment-duplicate-match{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 15px;padding:10px 12px;border:1px solid #e8c994;border-radius:7px;background:#fffaf0;color:#745522;font-size:11px}
 .appointment-new-patient-fields .appointment-consent{display:flex;flex-direction:row;align-items:center;gap:8px;grid-column:1/-1;font-weight:500}

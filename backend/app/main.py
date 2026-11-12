@@ -22,8 +22,9 @@ from sqlalchemy.orm import Session
 from app.auth import access_token, create_refresh, current_user, hash_password, token_hash, verify_password
 from app.config import settings
 from app.db import SessionLocal, get_db
-from app.models import Clinic, ClinicAppointment, MedicationReminder, MedicationSchedule, Patient, RefreshSession, Role, User, WhatsAppConnection
-from app.schemas import AdminClinicCreateIn, AppointmentCreateIn, AppointmentUpdateIn, ClinicMemberCreateIn, MedicationScheduleIn, PatientCreateIn, RegisterIn, WhatsAppConnectIn, WhatsAppTestMessageIn
+from app.models import Clinic, ClinicAppointment, ClinicAppointmentDay, MedicationReminder, MedicationSchedule, Patient, RefreshSession, Role, User, WhatsAppConnection
+from app.phone import normalize_indian_phone, whatsapp_recipient
+from app.schemas import AdminClinicCreateIn, AppointmentCreateIn, AppointmentDaySettingsIn, AppointmentUpdateIn, ClinicHoursIn, ClinicMemberCreateIn, MedicationScheduleIn, PatientCreateIn, RegisterIn, WhatsAppConnectIn, WhatsAppTestMessageIn
 from app.whatsapp_service import WhatsAppAPIError, decrypt_access_token, encrypt_access_token, get_phone_details, send_appointment_reminder, send_medication_reminder, send_test_template
 
 app = FastAPI(title="ClinicCare API", version="0.1.0")
@@ -252,6 +253,8 @@ async def login(request: Request, db: Session = Depends(get_db)):
     if not isinstance(username, str) or not isinstance(password, str):
         raise HTTPException(422, "Expected username and password fields")
     identity = username.strip()
+    if identity.replace(" ", "").isdigit() and len(identity.replace(" ", "")) == 10:
+        identity = normalize_indian_phone(identity)
     user = db.scalar(select(User).where(
         (User.email == identity.lower()) | (User.phone_e164 == identity)
     ))
@@ -319,7 +322,19 @@ def admin_update_clinic(clinic_id: uuid.UUID, status: str = Query(pattern="^(act
         raise HTTPException(404, "Clinic not found")
     clinic.status = status
     db.commit()
-    return {"id": str(clinic.id), "name": clinic.name, "timezone": clinic.timezone, "status": clinic.status}
+    return {"id": str(clinic.id), "name": clinic.name, "timezone": clinic.timezone, "status": clinic.status, "opening_time": clinic.opening_time, "closing_time": clinic.closing_time}
+
+
+@app.patch("/api/clinic/me")
+def update_clinic_hours(body: ClinicHoursIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    clinic_id = clinic_admin_id(user)
+    clinic = db.get(Clinic, clinic_id)
+    if not clinic:
+        raise HTTPException(404, "Clinic not found")
+    clinic.opening_time = body.opening_time
+    clinic.closing_time = body.closing_time
+    db.commit()
+    return {"id": str(clinic.id), "name": clinic.name, "timezone": clinic.timezone, "status": clinic.status, "opening_time": clinic.opening_time, "closing_time": clinic.closing_time}
 
 
 @app.post("/api/auth/refresh")
@@ -368,7 +383,7 @@ def clinic_me(user: User = Depends(current_user), db: Session = Depends(get_db))
     if user.role == Role.platform_admin or not user.clinic_id:
         raise HTTPException(403, "Clinic context required")
     clinic = db.get(Clinic, user.clinic_id)
-    return {"id": str(clinic.id), "name": clinic.name, "timezone": clinic.timezone, "status": clinic.status}
+    return {"id": str(clinic.id), "name": clinic.name, "timezone": clinic.timezone, "status": clinic.status, "opening_time": clinic.opening_time, "closing_time": clinic.closing_time}
 
 
 def clinic_admin_id(user: User) -> uuid.UUID:
@@ -508,7 +523,7 @@ async def send_whatsapp_test(body: WhatsAppTestMessageIn, user: User = Depends(c
         raise HTTPException(409, "Connect a WhatsApp Business phone number first")
     try:
         token = decrypt_access_token(connection.encrypted_access_token)
-        result = await send_test_template(connection.phone_number_id, token, body.to)
+        result = await send_test_template(connection.phone_number_id, token, whatsapp_recipient(body.to))
     except RuntimeError as exc:
         raise HTTPException(503, str(exc))
     except WhatsAppAPIError as exc:
@@ -602,6 +617,7 @@ def clinic_appointments(
     return [{
         "id": str(appointment.id), "patient_id": str(patient.id), "patient_name": patient.name,
         "title": appointment.title, "starts_at": appointment.starts_at,
+        "duration_minutes": appointment.duration_minutes,
         "notes": appointment.notes or "", "status": appointment.status,
         "reminder_minutes_before": appointment.reminder_minutes_before,
         "reminder_status": appointment.reminder_status,
@@ -611,6 +627,72 @@ def clinic_appointments(
         "confirmation_responded_at": appointment.confirmation_responded_at,
         "attendance_status": appointment.attendance_status,
     } for appointment, patient in rows]
+
+
+@app.get("/api/clinic/appointments/settings")
+def appointment_day_settings(local_date: date, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    clinic_id = clinic_context(user)
+    settings_row = db.get(ClinicAppointmentDay, (clinic_id, local_date))
+    clinic = db.get(Clinic, clinic_id)
+    return {
+        "local_date": local_date.isoformat(),
+        "slots_per_hour": settings_row.slots_per_hour if settings_row else 4,
+        "opening_time": clinic.opening_time,
+        "closing_time": clinic.closing_time,
+    }
+
+
+@app.put("/api/clinic/appointments/settings")
+def save_appointment_day_settings(body: AppointmentDaySettingsIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    clinic_id = clinic_context(user)
+    settings_row = db.get(ClinicAppointmentDay, (clinic_id, body.local_date))
+    if settings_row:
+        settings_row.slots_per_hour = body.slots_per_hour
+    else:
+        db.add(ClinicAppointmentDay(clinic_id=clinic_id, local_date=body.local_date, slots_per_hour=body.slots_per_hour))
+    db.commit()
+    return {"local_date": body.local_date.isoformat(), "slots_per_hour": body.slots_per_hour}
+
+
+@app.get("/api/clinic/appointments/slots")
+def appointment_slots(local_date: date, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    clinic_id = clinic_context(user)
+    clinic = db.get(Clinic, clinic_id)
+    clinic_zone = ZoneInfo(clinic.timezone)
+    day_settings = db.get(ClinicAppointmentDay, (clinic_id, local_date))
+    slots_per_hour = day_settings.slots_per_hour if day_settings else 4
+    duration = 60 // slots_per_hour
+    open_hour = int(clinic.opening_time[:2])
+    close_hour = int(clinic.closing_time[:2])
+    local_start = datetime.combine(local_date, time(open_hour), tzinfo=clinic_zone).astimezone(timezone.utc)
+    local_end = datetime.combine(local_date, time(close_hour), tzinfo=clinic_zone).astimezone(timezone.utc)
+    appointments = db.scalars(select(ClinicAppointment).where(
+        ClinicAppointment.clinic_id == clinic_id,
+        ClinicAppointment.status.in_(("scheduled", "confirmed")),
+        ClinicAppointment.starts_at < local_end,
+        ClinicAppointment.starts_at >= local_start - timedelta(minutes=15),
+    )).all()
+    now = datetime.now(timezone.utc)
+    result = []
+    for hour in range(open_hour, close_hour):
+        label = datetime.combine(local_date, time(hour)).strftime("%I:%M %p").lstrip("0")
+        hour_slots = []
+        for index in range(slots_per_hour):
+            local_time = time(hour, index * duration)
+            start = datetime.combine(local_date, local_time, tzinfo=clinic_zone).astimezone(timezone.utc)
+            end = start + timedelta(minutes=duration)
+            conflict = next((item for item in appointments if item.starts_at < end and item.starts_at + timedelta(minutes=item.duration_minutes) > start), None)
+            booked_patient = db.get(Patient, conflict.patient_id) if conflict else None
+            hour_slots.append({
+                "local_time": local_time.strftime("%H:%M"),
+                "starts_at": start,
+                "duration_minutes": duration,
+                "available": conflict is None and start > now,
+                "past": start <= now,
+                "patient_name": booked_patient.name if booked_patient else None,
+            })
+        result.append({"hour": hour, "label": label, "slots": hour_slots})
+    return {"local_date": local_date.isoformat(), "slots_per_hour": slots_per_hour, "duration_minutes": duration, "hours": result}
 
 
 @app.post("/api/clinic/appointments", status_code=201)
@@ -633,9 +715,35 @@ def create_clinic_appointment(body: AppointmentCreateIn, user: User = Depends(cu
     starts_at = starts_at.astimezone(timezone.utc)
     if starts_at <= datetime.now(timezone.utc):
         raise HTTPException(422, "Appointment date and time must be in the future")
+    local_starts_at = starts_at.astimezone(clinic_zone)
+    local_date = local_starts_at.date()
+    day_settings = db.get(ClinicAppointmentDay, (clinic_id, local_date))
+    slots_per_hour = day_settings.slots_per_hour if day_settings else 4
+    expected_duration = 60 // slots_per_hour
+    if body.duration_minutes is not None and body.duration_minutes != expected_duration:
+        raise HTTPException(409, "Appointment slot settings changed. Refresh the selected day and choose an available time again.")
+    duration_minutes = body.duration_minutes or expected_duration
+    opening_hour, opening_minute = (int(part) for part in clinic.opening_time.split(":"))
+    minutes_from_open = (local_starts_at.hour - opening_hour) * 60 + local_starts_at.minute - opening_minute
+    closing_hour, closing_minute = (int(part) for part in clinic.closing_time.split(":"))
+    minutes_until_close = (closing_hour - local_starts_at.hour) * 60 + closing_minute - local_starts_at.minute
+    if minutes_from_open < 0 or (body.duration_minutes is not None and minutes_from_open % expected_duration) or minutes_until_close < duration_minutes:
+        raise HTTPException(422, "Choose one of the available appointment time slots")
+    if db.bind and db.bind.dialect.name == "postgresql":
+        db.execute(select(func.pg_advisory_xact_lock(func.hashtext(f"{clinic_id}:{local_date}"))))
+    candidate_end = starts_at + timedelta(minutes=duration_minutes)
+    possible_conflicts = db.scalars(select(ClinicAppointment).where(
+        ClinicAppointment.clinic_id == clinic_id,
+        ClinicAppointment.status.in_(("scheduled", "confirmed")),
+        ClinicAppointment.starts_at < candidate_end,
+        ClinicAppointment.starts_at >= starts_at - timedelta(minutes=15),
+    )).all()
+    conflict = next((item for item in possible_conflicts if item.starts_at + timedelta(minutes=item.duration_minutes) > starts_at), None)
+    if conflict:
+        raise HTTPException(409, "This time overlaps an existing appointment. Choose a green time slot.")
     appointment = ClinicAppointment(
         clinic_id=clinic_id, patient_id=patient.id, title=body.title.strip(),
-        starts_at=starts_at, notes=body.notes.strip() or None, status="scheduled",
+        starts_at=starts_at, duration_minutes=duration_minutes, notes=body.notes.strip() or None, status="scheduled",
         reminder_minutes_before=body.reminder_minutes_before,
         reminder_status="pending" if body.reminder_minutes_before is not None else "not_requested",
         confirmation_status="pending" if body.reminder_minutes_before is not None else "not_requested",
@@ -646,6 +754,7 @@ def create_clinic_appointment(body: AppointmentCreateIn, user: User = Depends(cu
     db.refresh(appointment)
     return {"id": str(appointment.id), "patient_id": str(patient.id), "patient_name": patient.name,
             "title": appointment.title, "starts_at": appointment.starts_at,
+            "duration_minutes": appointment.duration_minutes,
             "notes": appointment.notes or "", "status": appointment.status,
             "reminder_minutes_before": appointment.reminder_minutes_before,
             "reminder_status": appointment.reminder_status,

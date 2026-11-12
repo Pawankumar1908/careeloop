@@ -3,6 +3,8 @@ import uuid
 from datetime import date, datetime, time
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
+from app.phone import normalize_indian_phone
+
 
 class RegisterIn(BaseModel):
     clinic_name: str = Field(min_length=2, max_length=200)
@@ -21,16 +23,54 @@ class AdminClinicCreateIn(BaseModel):
 class ClinicMemberCreateIn(BaseModel):
     name: str = Field(min_length=1, max_length=160)
     designation: str = Field(min_length=2, max_length=80)
-    phone_e164: str = Field(min_length=9, max_length=16, pattern=r"^\+[1-9]\d{7,14}$")
+    phone_e164: str = Field(min_length=9, max_length=20)
     password: str = Field(min_length=12, max_length=128)
+
+    @field_validator("phone_e164", mode="before")
+    @classmethod
+    def normalize_phone(cls, value: str) -> str:
+        return normalize_indian_phone(value)
 
 
 class AppointmentCreateIn(BaseModel):
     patient_id: uuid.UUID
     title: str = Field(min_length=2, max_length=160)
     starts_at: datetime
+    duration_minutes: int | None = Field(default=None, ge=3, le=15)
     notes: str = Field(default="", max_length=2000)
     reminder_minutes_before: int | None = Field(default=None, ge=15, le=10080)
+
+    @field_validator("duration_minutes")
+    @classmethod
+    def valid_duration(cls, value: int | None) -> int | None:
+        if value is None:
+            return value
+        if value not in {3, 5, 10, 15}:
+            raise ValueError("Appointment duration must be 3, 5, 10, or 15 minutes")
+        return value
+
+
+class ClinicHoursIn(BaseModel):
+    opening_time: str = Field(pattern=r"^([01]\d|2[0-3]):00$")
+    closing_time: str = Field(pattern=r"^([01]\d|2[0-3]):00$")
+
+    @model_validator(mode="after")
+    def closing_after_opening(self):
+        if self.closing_time <= self.opening_time:
+            raise ValueError("Closing time must be later than opening time")
+        return self
+
+
+class AppointmentDaySettingsIn(BaseModel):
+    local_date: date
+    slots_per_hour: int = Field(ge=4, le=20)
+
+    @field_validator("slots_per_hour")
+    @classmethod
+    def valid_slots_per_hour(cls, value: int) -> int:
+        if value not in {4, 6, 12, 20}:
+            raise ValueError("Choose 4, 6, 12, or 20 slots per hour")
+        return value
 
 
 class AppointmentUpdateIn(BaseModel):
@@ -81,7 +121,12 @@ class WhatsAppConnectIn(BaseModel):
 
 
 class WhatsAppTestMessageIn(BaseModel):
-    to: str = Field(min_length=8, max_length=15, pattern=r"^[1-9]\d{7,14}$")
+    to: str = Field(min_length=9, max_length=20)
+
+    @field_validator("to", mode="before")
+    @classmethod
+    def normalize_recipient(cls, value: str) -> str:
+        return normalize_indian_phone(value)
 
 
 class MedicationScheduleIn(BaseModel):
@@ -139,6 +184,4 @@ class PatientCreateIn(BaseModel):
     @field_validator("phone_e164")
     @classmethod
     def validate_patient_phone(cls, value: str) -> str:
-        if not re.fullmatch(r"\+[1-9]\d{7,14}", value):
-            raise ValueError("Phone must use international E.164 format")
-        return value
+        return normalize_indian_phone(value)

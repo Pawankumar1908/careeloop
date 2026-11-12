@@ -24,6 +24,8 @@ class Clinic(Base):
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(200))
     timezone: Mapped[str] = mapped_column(String(64), default="Asia/Kolkata")
+    opening_time: Mapped[str] = mapped_column(String(5), default="08:00")
+    closing_time: Mapped[str] = mapped_column(String(5), default="20:00")
     status: Mapped[str] = mapped_column(String(24), default="active")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     users: Mapped[list["User"]] = relationship(back_populates="clinic")
@@ -135,6 +137,7 @@ class ClinicAppointment(Base):
     patient_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("patients.id", ondelete="CASCADE"), index=True)
     title: Mapped[str] = mapped_column(String(160))
     starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    duration_minutes: Mapped[int] = mapped_column(default=15)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(24), default="scheduled")
     reminder_minutes_before: Mapped[int | None] = mapped_column(nullable=True)
@@ -148,4 +151,12 @@ class ClinicAppointment(Base):
     attendance_status: Mapped[str] = mapped_column(String(24), default="unmarked")
     created_by_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("clinic_users.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+
+class ClinicAppointmentDay(Base):
+    __tablename__ = "clinic_appointment_days"
+    clinic_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("clinics.id", ondelete="CASCADE"), primary_key=True)
+    local_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    slots_per_hour: Mapped[int] = mapped_column(default=4)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
